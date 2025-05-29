@@ -8,8 +8,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-const BOT_TOKEN = "ETHERYA"; // Remplace par ton token bot sécurisé
-client.login(BOT_TOKEN);
+client.login(process.env.ETHERYA);
 
 const app = express();
 app.use(cors());
