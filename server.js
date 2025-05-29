@@ -7,7 +7,7 @@ app.use(cors()); // autorise les appels depuis ton frontend
 
 const CLIENT_ID = "1356693934012891176";
 const CLIENT_SECRET = "_IE6vn65TN0qbIcmfyFE1T62EhzXWToU";
-const REDIRECT_URI = "http://127.0.0.1:5500/pages/index.html";
+const REDIRECT_URI = "http://127.0.0.1:5500/pages/serveur.html";
 
 app.get("/api/discord-oauth", async (req, res) => {
   const code = req.query.code;
