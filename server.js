@@ -1,11 +1,14 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, PermissionsBitField } = require("discord.js");
 
-// Initialisation du bot Discord
+// Initialisation du bot Discord avec les bonnes intentions
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers, // requis pour vérifier les permissions
+  ],
 });
 
 client.login(process.env.ETHERYA);
@@ -30,6 +33,7 @@ app.get("/api/discord-oauth", async (req, res) => {
   });
 
   try {
+    // Récupération du token d'accès
     const tokenResponse = await fetch("https://discord.com/api/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -41,29 +45,43 @@ app.get("/api/discord-oauth", async (req, res) => {
       return res.json({ success: false, error: "Token non reçu", details: tokenData });
     }
 
-    // Récupère les infos utilisateur
+    // Récupération des infos utilisateur
     const userResponse = await fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const userData = await userResponse.json();
 
-    // Récupère les serveurs de l'utilisateur
+    // Récupération des serveurs de l'utilisateur
     const guildsResponse = await fetch("https://discord.com/api/users/@me/guilds", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const userGuilds = await guildsResponse.json();
 
-    // Attends que le bot soit prêt
+    // Attente de la disponibilité du bot
     if (!client.isReady()) {
       await new Promise(resolve => client.once("ready", resolve));
     }
 
-    // Filtrer les serveurs mutualisés (où le bot et l'utilisateur sont tous les deux)
+    // Liste des serveurs mutualisés enrichie avec permissions
     const botGuilds = client.guilds.cache;
-    const mutualGuilds = userGuilds
+
+    const mutualGuilds = await Promise.all(userGuilds
       .filter(g => botGuilds.has(g.id))
-      .map(g => {
+      .map(async g => {
         const botGuild = botGuilds.get(g.id);
+
+        let hasAdminPerms = false;
+        let isInServer = false;
+
+        try {
+          const member = await botGuild.members.fetch(userData.id);
+          isInServer = true;
+          hasAdminPerms = member.permissions.has(PermissionsBitField.Flags.Administrator);
+        } catch (err) {
+          // L'utilisateur n'est pas dans ce serveur ou erreur
+          isInServer = false;
+        }
+
         return {
           id: g.id,
           name: g.name,
@@ -72,8 +90,10 @@ app.get("/api/discord-oauth", async (req, res) => {
             : null,
           isOwner: g.owner,
           memberCount: botGuild.memberCount,
+          hasAdminPerms,
+          isInServer,
         };
-      });
+      }));
 
     res.json({ success: true, user: userData, mutualGuilds });
   } catch (err) {
@@ -81,5 +101,6 @@ app.get("/api/discord-oauth", async (req, res) => {
   }
 });
 
+// Démarrage du serveur
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Serveur en ligne sur le port " + PORT));
