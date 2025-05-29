@@ -1,3 +1,22 @@
+const express = require("express");
+const fetch = require("node-fetch");
+const cors = require("cors");
+const { Client, GatewayIntentBits } = require("discord.js");
+
+// Initialisation du bot Discord
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+});
+
+client.login(process.env.ETHERYA);
+
+const app = express();
+app.use(cors());
+
+const CLIENT_ID = "1356693934012891176";
+const CLIENT_SECRET = "_IE6vn65TN0qbIcmfyFE1T62EhzXWToU";
+const REDIRECT_URI = "http://127.0.0.1:5500/pages/serveur.html";
+
 app.get("/api/discord-oauth", async (req, res) => {
   const code = req.query.code;
 
