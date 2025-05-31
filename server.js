@@ -18,24 +18,27 @@ app.use(cors());
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
+// Redirection utilisée dans Discord Developer Portal
+const REDIRECT_URI = "https://pdd-xrdi.onrender.com/serveur.html";
+
 // Route OAuth2
 app.get("/api/discord-oauth", async (req, res) => {
   const code = req.query.code;
-  const redirectUri = req.query.redirect_uri;
 
-  if (!code || !redirectUri) {
+  if (!code) {
     return res.status(400).json({
       success: false,
-      error: "Code ou redirect_uri manquant",
-      received: { code, redirectUri }
+      error: "Code manquant",
+      received: { code }
     });
   }
 
-@@ -36,7 +38,7 @@ app.get("/api/discord-oauth", async (req, res) => {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
     client_secret: CLIENT_SECRET,
     grant_type: "authorization_code",
     code: code,
-    redirect_uri: redirectUri,
+    redirect_uri: REDIRECT_URI,
   });
 
   try {
