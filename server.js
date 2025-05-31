@@ -73,9 +73,10 @@ app.get("/api/discord-oauth", async (req, res) => {
     const userGuilds = await guildsResponse.json();
 
     // Attendre que le bot soit prêt
-    if (!client.isReady()) {
+    if (!client.readyAt) {
       await new Promise(resolve => client.once("ready", resolve));
     }
+
 
     const botGuilds = client.guilds.cache;
 
