@@ -50,7 +50,6 @@ app.get("/api/discord-oauth", async (req, res) => {
     });
 
     const tokenData = await tokenResponse.json();
-    console.log("TOKEN RESPONSE:", tokenData);
 
     if (!tokenData.access_token) {
       return res.status(401).json({
