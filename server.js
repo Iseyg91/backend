@@ -8,12 +8,13 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
-client.login(process.env.ETHERYA); // Token du bot stocké dans les variables Render
+// Connexion au bot (token stocké en variable Render)
+client.login(process.env.ETHERYA);
 
 const app = express();
 app.use(cors());
 
-// Configuration OAuth via les variables d'environnement
+// Variables OAuth stockées dans Render
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
@@ -23,7 +24,11 @@ app.get("/api/discord-oauth", async (req, res) => {
   const redirectUri = req.query.redirect_uri;
 
   if (!code || !redirectUri) {
-    return res.json({ success: false, error: "Code ou redirect_uri manquant" });
+    return res.status(400).json({
+      success: false,
+      error: "Code ou redirect_uri manquant",
+      received: { code, redirectUri }
+    });
   }
 
   const params = new URLSearchParams({
@@ -35,6 +40,7 @@ app.get("/api/discord-oauth", async (req, res) => {
   });
 
   try {
+    // Obtenir l'access token depuis Discord
     const tokenResponse = await fetch("https://discord.com/api/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -44,24 +50,26 @@ app.get("/api/discord-oauth", async (req, res) => {
     const tokenData = await tokenResponse.json();
 
     if (!tokenData.access_token) {
-      return res.json({
+      return res.status(401).json({
         success: false,
         error: "Token non reçu",
         details: tokenData,
       });
     }
 
+    // Récupérer les infos utilisateur
     const userResponse = await fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const userData = await userResponse.json();
 
+    // Récupérer les serveurs de l'utilisateur
     const guildsResponse = await fetch("https://discord.com/api/users/@me/guilds", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const userGuilds = await guildsResponse.json();
 
-    // S'assurer que le bot est prêt
+    // Attendre que le bot soit prêt
     if (!client.isReady()) {
       await new Promise(resolve => client.once("ready", resolve));
     }
@@ -73,7 +81,6 @@ app.get("/api/discord-oauth", async (req, res) => {
         .filter(g => botGuilds.has(g.id))
         .map(async g => {
           const botGuild = botGuilds.get(g.id);
-
           let hasAdminPerms = false;
           let isInServer = false;
 
@@ -81,7 +88,7 @@ app.get("/api/discord-oauth", async (req, res) => {
             const member = await botGuild.members.fetch(userData.id);
             isInServer = true;
             hasAdminPerms = member.permissions.has(PermissionsBitField.Flags.Administrator);
-          } catch (err) {
+          } catch {
             isInServer = false;
           }
 
@@ -100,11 +107,17 @@ app.get("/api/discord-oauth", async (req, res) => {
     );
 
     res.json({ success: true, user: userData, mutualGuilds });
+
   } catch (err) {
     console.error("Erreur serveur OAuth :", err);
-    res.json({ success: false, error: "Erreur serveur", details: err.message });
+    res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+      details: err.message,
+    });
   }
 });
 
+// Lancer le serveur
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Serveur en ligne sur le port " + PORT));
