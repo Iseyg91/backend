@@ -8,7 +8,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
-client.login(process.env.ETHERYA);
+client.login(process.env.ETHERYA); // Token du bot stocké dans les variables Render
 
 const app = express();
 app.use(cors());
@@ -40,6 +40,7 @@ app.get("/api/discord-oauth", async (req, res) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params,
     });
+
     const tokenData = await tokenResponse.json();
 
     if (!tokenData.access_token) {
@@ -60,6 +61,7 @@ app.get("/api/discord-oauth", async (req, res) => {
     });
     const userGuilds = await guildsResponse.json();
 
+    // S'assurer que le bot est prêt
     if (!client.isReady()) {
       await new Promise(resolve => client.once("ready", resolve));
     }
@@ -99,6 +101,7 @@ app.get("/api/discord-oauth", async (req, res) => {
 
     res.json({ success: true, user: userData, mutualGuilds });
   } catch (err) {
+    console.error("Erreur serveur OAuth :", err);
     res.json({ success: false, error: "Erreur serveur", details: err.message });
   }
 });
