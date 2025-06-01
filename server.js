@@ -2,6 +2,7 @@ const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
 const { Client, GatewayIntentBits, PermissionsBitField } = require("discord.js");
+const mongoose = require("mongoose");
 
 // Initialisation du bot Discord
 const client = new Client({
@@ -11,8 +12,19 @@ const client = new Client({
 // Connexion au bot (token stocké en variable Render)
 client.login(process.env.ETHERYA);
 
+// Connexion à la base de données MongoDB
+mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
+const GuildSchema = new mongoose.Schema({
+  guildId: String,
+  serverInfo: String,
+});
+
+const Guild = mongoose.model("Guild", GuildSchema);
+
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 // Variables OAuth stockées dans Render
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -76,8 +88,6 @@ app.get("/api/discord-oauth", async (req, res) => {
       await new Promise(resolve => client.once("ready", resolve));
     }
 
-
-
     const botGuilds = client.guilds.cache;
 
     const mutualGuilds = await Promise.all(
@@ -119,6 +129,37 @@ app.get("/api/discord-oauth", async (req, res) => {
       error: "Erreur serveur",
       details: err.message,
     });
+  }
+});
+
+// Route pour obtenir les informations d'un serveur
+app.get("/api/guild/:id", async (req, res) => {
+  const guildId = req.params.id;
+
+  try {
+    const guild = await Guild.findOne({ guildId });
+    if (!guild) {
+      return res.status(404).json({ success: false, error: "Guild not found" });
+    }
+
+    res.json({ success: true, guild });
+  } catch (err) {
+    console.error("Error fetching guild:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+// Route pour mettre à jour les informations d'un serveur
+app.post("/api/guild/:id", async (req, res) => {
+  const guildId = req.params.id;
+  const { serverInfo } = req.body;
+
+  try {
+    await Guild.findOneAndUpdate({ guildId }, { serverInfo }, { upsert: true });
+    res.json({ success: true, message: "Guild info updated successfully" });
+  } catch (err) {
+    console.error("Error updating guild info:", err);
+    res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
