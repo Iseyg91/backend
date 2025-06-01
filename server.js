@@ -17,7 +17,11 @@ mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTop
 
 const GuildSchema = new mongoose.Schema({
   guildId: String,
-  serverInfo: String,
+  serverName: String,
+  welcomeChannel: String,
+  welcomeMessage: String,
+  logChannel: String,
+  modRole: String,
 });
 
 const Guild = mongoose.model("Guild", GuildSchema);
@@ -132,8 +136,8 @@ app.get("/api/discord-oauth", async (req, res) => {
   }
 });
 
-// Route pour obtenir les informations d'un serveur
-app.get("/api/guild/:id", async (req, res) => {
+// Route pour obtenir les informations de configuration d'un serveur
+app.get("/api/guild/setup/:id", async (req, res) => {
   const guildId = req.params.id;
 
   try {
@@ -142,23 +146,28 @@ app.get("/api/guild/:id", async (req, res) => {
       return res.status(404).json({ success: false, error: "Guild not found" });
     }
 
-    res.json({ success: true, guild });
+    res.json({ success: true, setup: guild });
   } catch (err) {
-    console.error("Error fetching guild:", err);
+    console.error("Error fetching guild setup:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
-// Route pour mettre à jour les informations d'un serveur
-app.post("/api/guild/:id", async (req, res) => {
+// Route pour mettre à jour les informations de configuration d'un serveur
+app.post("/api/guild/setup/:id", async (req, res) => {
   const guildId = req.params.id;
-  const { serverInfo } = req.body;
+  const { serverName, welcomeChannel, welcomeMessage, logChannel, modRole } = req.body;
 
   try {
-    await Guild.findOneAndUpdate({ guildId }, { serverInfo }, { upsert: true });
-    res.json({ success: true, message: "Guild info updated successfully" });
+    await Guild.findOneAndUpdate(
+      { guildId },
+      { serverName, welcomeChannel, welcomeMessage, logChannel, modRole },
+      { upsert: true }
+    );
+
+    res.json({ success: true, message: "Guild setup updated successfully" });
   } catch (err) {
-    console.error("Error updating guild info:", err);
+    console.error("Error updating guild setup:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
