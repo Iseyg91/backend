@@ -1,16 +1,17 @@
-require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const fetch = require("node-fetch");
 const app = express();
+
 app.use(express.json());
 
-// Connexion à MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
+// Connexion à MongoDB via Render (variables définies dans Settings > Environment)
+mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
+// Schéma de configuration du serveur
 const GuildSchema = new mongoose.Schema({
   guildId: String,
   prefix: String,
@@ -21,9 +22,7 @@ const GuildSchema = new mongoose.Schema({
 
 const Guild = mongoose.model("Guild", GuildSchema);
 
-/**
- * Middleware pour vérifier que l'utilisateur est bien admin du serveur
- */
+// Middleware de vérification des permissions admin
 async function checkGuildAdmin(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -35,21 +34,17 @@ async function checkGuildAdmin(req, res, next) {
   const guildId = req.params.id;
 
   try {
-    // 1. Obtenir les guilds de l'utilisateur
     const guildsRes = await fetch("https://discord.com/api/users/@me/guilds", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
     const guilds = await guildsRes.json();
-
-    // 2. Trouver le serveur correspondant
     const guild = guilds.find((g) => g.id === guildId);
 
     if (!guild) {
       return res.status(403).json({ success: false, error: "Vous n'êtes pas dans ce serveur" });
     }
 
-    // 3. Vérifier si l'utilisateur est administrateur
     const ADMIN_PERMISSION = 0x00000008;
     const hasAdmin = (guild.permissions & ADMIN_PERMISSION) === ADMIN_PERMISSION;
 
@@ -57,15 +52,14 @@ async function checkGuildAdmin(req, res, next) {
       return res.status(403).json({ success: false, error: "Permission administrateur requise" });
     }
 
-    // autorisé
-    next();
+    next(); // autorisé
   } catch (err) {
     console.error("Auth error:", err);
     res.status(500).json({ success: false, error: "Erreur lors de la vérification" });
   }
 }
 
-// ✨ Route pour obtenir les infos d’un serveur (publique)
+// ✨ Route publique pour obtenir les infos d’un serveur
 app.get("/api/guild/setup/:id", async (req, res) => {
   const guildId = req.params.id;
 
@@ -82,7 +76,7 @@ app.get("/api/guild/setup/:id", async (req, res) => {
   }
 });
 
-// ✨ Route sécurisée pour modifier un serveur (admin seulement)
+// ✨ Route protégée pour modifier les infos d’un serveur
 app.post("/api/guild/setup/:id", checkGuildAdmin, async (req, res) => {
   const guildId = req.params.id;
   const { prefix, owner, admin_role, staff_role } = req.body;
@@ -101,6 +95,6 @@ app.post("/api/guild/setup/:id", checkGuildAdmin, async (req, res) => {
   }
 });
 
-// Lancer le serveur
+// Démarrage du serveur
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Serveur en ligne sur le port " + PORT));
