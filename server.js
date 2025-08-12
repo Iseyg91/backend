@@ -1,100 +1,74 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const fetch = require("node-fetch");
+// server.js
+const express = require('express');
+const axios = require('axios'); // Pour faire des requêtes HTTP
+const cors = require('cors'); // Pour gérer les CORS
+require('dotenv').config(); // Pour charger les variables d'environnement
+
 const app = express();
+const PORT = process.env.PORT || 3000; // Le port sur lequel votre backend va écouter
 
-app.use(express.json());
+// Middleware
+app.use(cors()); // Active CORS pour toutes les requêtes
+app.use(express.json()); // Pour parser le JSON dans les requêtes
 
-// Connexion à MongoDB via Render (variables définies dans Settings > Environment)
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// Route pour l'authentification Discord
+app.get('/api/discord-oauth', async (req, res) => {
+  const code = req.query.code;
 
-// Schéma de configuration du serveur
-const GuildSchema = new mongoose.Schema({
-  guildId: String,
-  prefix: String,
-  owner: String,
-  admin_role: String,
-  staff_role: String,
-});
-
-const Guild = mongoose.model("Guild", GuildSchema);
-
-// Middleware de vérification des permissions admin
-async function checkGuildAdmin(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ success: false, error: "Missing or invalid token" });
+  if (!code) {
+    return res.status(400).json({ success: false, error: 'Code Discord manquant.' });
   }
 
-  const accessToken = authHeader.split(" ")[1];
-  const guildId = req.params.id;
-
   try {
-    const guildsRes = await fetch("https://discord.com/api/users/@me/guilds", {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    // Étape 1: Échanger le code contre un access_token
+    const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', new URLSearchParams({
+      client_id: process.env.CLIENT_ID, // Utilisez la variable d'environnement
+      client_secret: process.env.CLIENT_SECRET, // Utilisez la variable d'environnement
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: process.env.REDIRECT_URI, // Utilisez la variable d'environnement
+      scope: 'identify guilds' // Assurez-vous que les scopes correspondent à ceux demandés par le frontend
+    }), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
     });
 
-    const guilds = await guildsRes.json();
-    const guild = guilds.find((g) => g.id === guildId);
+    const { access_token, token_type } = tokenResponse.data;
 
-    if (!guild) {
-      return res.status(403).json({ success: false, error: "Vous n'êtes pas dans ce serveur" });
-    }
+    // Étape 2: Utiliser l'access_token pour obtenir les infos de l'utilisateur
+    const userResponse = await axios.get('https://discord.com/api/users/@me', {
+      headers: {
+        authorization: `${token_type} ${access_token}`
+      }
+    });
 
-    const ADMIN_PERMISSION = 0x00000008;
-    const hasAdmin = (guild.permissions & ADMIN_PERMISSION) === ADMIN_PERMISSION;
+    const user = userResponse.data;
 
-    if (!hasAdmin) {
-      return res.status(403).json({ success: false, error: "Permission administrateur requise" });
-    }
+    // Étape 3: (Optionnel) Obtenir les guildes de l'utilisateur
+    const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+      headers: {
+        authorization: `${token_type} ${access_token}`
+      }
+    });
 
-    next(); // autorisé
-  } catch (err) {
-    console.error("Auth error:", err);
-    res.status(500).json({ success: false, error: "Erreur lors de la vérification" });
-  }
-}
+    const guilds = guildsResponse.data;
 
-// ✨ Route publique pour obtenir les infos d’un serveur
-app.get("/api/guild/setup/:id", async (req, res) => {
-  const guildId = req.params.id;
+    // Renvoyer les données au frontend
+    res.json({
+      success: true,
+      user: user,
+      guilds: guilds, // Vous pouvez filtrer les guildes ici si nécessaire (ex: seulement celles où le bot est admin)
+      accessToken: access_token // Renvoyez l'access_token si dashboard-servers.html en a besoin
+    });
 
-  try {
-    const guild = await Guild.findOne({ guildId });
-    if (!guild) {
-      return res.status(404).json({ success: false, error: "Serveur introuvable" });
-    }
-
-    res.json({ success: true, setup: guild });
-  } catch (err) {
-    console.error("Erreur lors de la récupération :", err);
-    res.status(500).json({ success: false, error: "Erreur serveur" });
+  } catch (error) {
+    console.error('Erreur lors de l\'échange OAuth ou de la récupération des données Discord:', error.response ? error.response.data : error.message);
+    res.status(500).json({ success: false, error: 'Erreur lors de l\'authentification Discord.' });
   }
 });
 
-// ✨ Route protégée pour modifier les infos d’un serveur
-app.post("/api/guild/setup/:id", checkGuildAdmin, async (req, res) => {
-  const guildId = req.params.id;
-  const { prefix, owner, admin_role, staff_role } = req.body;
-
-  try {
-    await Guild.findOneAndUpdate(
-      { guildId },
-      { prefix, owner, admin_role, staff_role },
-      { upsert: true }
-    );
-
-    res.json({ success: true, message: "Configuration mise à jour avec succès" });
-  } catch (err) {
-    console.error("Erreur lors de la mise à jour :", err);
-    res.status(500).json({ success: false, error: "Erreur serveur" });
-  }
+// Démarrer le serveur
+app.listen(PORT, () => {
+  console.log(`Backend Discord OAuth écoutant sur le port ${PORT}`);
 });
-
-// Démarrage du serveur
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Serveur en ligne sur le port " + PORT));
