@@ -41,11 +41,13 @@ async function getDbConnection() {
     return connection;
   } catch (error) {
     console.error('Erreur de connexion à la base de données MySQL :', error);
-    // Ne pas relancer l'erreur ici si vous voulez que le serveur continue de fonctionner
-    // mais assurez-vous de gérer les erreurs de connexion dans les routes qui l'utilisent.
+    // Propage l'erreur pour la gérer dans les routes appelantes
     throw error;
   }
 }
+
+// Fonction utilitaire pour introduire un délai
+const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Route d'authentification Discord
 app.get('/api/discord-oauth', async (req, res) => {
@@ -100,6 +102,10 @@ app.get('/api/discord-oauth', async (req, res) => {
 
       // Vérifier si le bot est dans le serveur et obtenir le nombre de membres
       if (BOT_TOKEN) {
+        // Ajouter un délai avant chaque requête pour éviter les rate limits
+        // Ce délai est crucial pour éviter les 429
+        await delay(200); // Délai de 200ms entre chaque requête (ajustez si nécessaire)
+
         try {
           const botGuildResponse = await axios.get(`https://discord.com/api/guilds/${g.id}`, {
             headers: {
@@ -111,9 +117,23 @@ app.get('/api/discord-oauth', async (req, res) => {
           memberCount = botGuildData.approximate_member_count || botGuildData.member_count || 0;
           isInServer = true; // Si la requête réussit, le bot est dans le serveur
         } catch (botError) {
-          // Le bot n'est pas dans le serveur ou n'a pas les permissions nécessaires
-          console.warn(`Bot not in guild ${g.name} (${g.id}) or error fetching details:`, botError.response ? botError.response.status : botError.message);
-          isInServer = false;
+          // Gérer spécifiquement les erreurs pour le débogage
+          if (botError.response) {
+            if (botError.response.status === 404) {
+              // Bot n'est pas dans la guilde
+              console.warn(`Bot not in guild ${g.name} (${g.id}): 404 Not Found`);
+            } else if (botError.response.status === 429) {
+              // Rate limited
+              console.error(`Rate limited for guild ${g.name} (${g.id}): 429 Too Many Requests. Consider increasing delay.`);
+            } else {
+              // Autre erreur HTTP
+              console.error(`Error fetching guild ${g.name} (${g.id}) details: ${botError.response.status} - ${botError.response.statusText}`);
+            }
+          } else {
+            // Erreur réseau ou autre
+            console.error(`Network error or other issue for guild ${g.name} (${g.id}):`, botError.message);
+          }
+          isInServer = false; // Si une erreur se produit, le bot n'est pas considéré comme présent
         }
       } else {
         console.warn("BOT_TOKEN n'est pas défini. Impossible de vérifier la présence du bot ou le nombre de membres.");
@@ -144,7 +164,7 @@ app.get('/api/discord-oauth', async (req, res) => {
   }
 });
 
-// Exemple de route pour interagir avec la base de données (à adapter)
+// Exemple de route pour interagir avec la base de données (à adapter selon vos besoins)
 app.get('/api/test-db', async (req, res) => {
   let connection;
   try {
@@ -155,7 +175,7 @@ app.get('/api/test-db', async (req, res) => {
     console.error('Erreur lors du test de la DB :', error);
     res.status(500).json({ success: false, error: 'Erreur de connexion ou de requête DB.' });
   } finally {
-    if (connection) connection.end();
+    if (connection) connection.end(); // Ferme la connexion
   }
 });
 
