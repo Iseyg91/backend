@@ -6,6 +6,7 @@ const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const { Client, GatewayIntentBits } = require('discord.js');
+const { getGuildSettings, updateGuildSettings } = require('./database'); // <-- ajout
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 // Discord OAuth2
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI; 
+const REDIRECT_URI = process.env.REDIRECT_URI;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
 // MySQL
@@ -140,6 +141,35 @@ app.get('/api/test-db', async (req, res) => {
     res.status(500).json({ success: false, error: 'Erreur de connexion ou requête DB.' });
   } finally {
     if (connection) connection.end();
+  }
+});
+
+// ----------------------
+// Routes pour paramètres d'économie
+// ----------------------
+app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
+  const guildId = req.params.guildId;
+  try {
+    const settings = await getGuildSettings(guildId);
+    if (settings) {
+      return res.json(settings);
+    }
+    return res.status(404).json({ message: "Aucun paramètre trouvé pour ce serveur." });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erreur lors de la récupération des paramètres." });
+  }
+});
+
+app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
+  const guildId = req.params.guildId;
+  const settings = req.body;
+  try {
+    await updateGuildSettings(guildId, settings);
+    return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres." });
   }
 });
 
