@@ -1,52 +1,83 @@
 // server.js
+require('dotenv').config(); // Charge les variables d'environnement depuis .env
+
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-require('dotenv').config();
+const mysql = require('mysql2/promise'); // Utilise la version promise pour async/await
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Variables d'environnement pour Discord OAuth2
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI; // Doit être https://project-delta.fr/serveur.html
+const BOT_TOKEN = process.env.BOT_TOKEN; // Token de votre bot Discord
 
-// Route pour l'authentification Discord
+// Variables d'environnement pour MySQL
+const DB_HOST = process.env.DB_HOST;
+const DB_USER = process.env.DB_USER;
+const DB_PASSWORD = process.env.DB_PASSWORD;
+const DB_NAME = process.env.DB_NAME;
+
+// Middleware
+app.use(cors()); // Permet les requêtes cross-origin depuis votre frontend
+app.use(express.json()); // Pour parser les corps de requête JSON
+
+// Configuration de la base de données MySQL
+const dbConfig = {
+  host: DB_HOST,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME
+};
+
+// Fonction pour obtenir une connexion à la base de données
+async function getDbConnection() {
+  try {
+    const connection = await mysql.createConnection(dbConfig);
+    console.log('Connecté à la base de données MySQL !');
+    return connection;
+  } catch (error) {
+    console.error('Erreur de connexion à la base de données MySQL :', error);
+    // Ne pas relancer l'erreur ici si vous voulez que le serveur continue de fonctionner
+    // mais assurez-vous de gérer les erreurs de connexion dans les routes qui l'utilisent.
+    throw error;
+  }
+}
+
+// Route d'authentification Discord
 app.get('/api/discord-oauth', async (req, res) => {
   const code = req.query.code;
-  console.log('Code reçu:', code);
 
   if (!code) {
-    return res.status(400).json({ success: false, error: 'Code Discord manquant.' });
+    return res.status(400).json({ success: false, error: 'Code non fourni.' });
   }
 
   try {
-    // Étape 1: Échanger le code contre un access_token
+    // Étape 1: Échanger le code contre un token d'accès
     const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', new URLSearchParams({
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
       grant_type: 'authorization_code',
       code: code,
-      redirect_uri: process.env.REDIRECT_URI,
-      scope: 'identify guilds'
-    }), {
+      redirect_uri: REDIRECT_URI,
+      scope: 'identify guilds' // Assurez-vous que ces scopes sont demandés
+    }).toString(), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
 
-    console.log('Réponse du token:', tokenResponse.data);
-
     const { access_token, token_type } = tokenResponse.data;
 
-    // Étape 2: Utiliser l'access_token pour obtenir les infos de l'utilisateur
+    // Étape 2: Obtenir les informations de l'utilisateur
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
       headers: {
         authorization: `${token_type} ${access_token}`
       }
     });
-
-    console.log('Réponse de l\'utilisateur:', userResponse.data);
     const user = userResponse.data;
 
     // Étape 3: Obtenir les guildes de l'utilisateur
@@ -55,39 +86,80 @@ app.get('/api/discord-oauth', async (req, res) => {
         authorization: `${token_type} ${access_token}`
       }
     });
+    const userGuilds = guildsResponse.data; // Guildes où l'utilisateur est présent
 
-    let guilds = guildsResponse.data;
-    const ADMINISTRATOR_PERMISSION = 0x8;
+    // Étape 4: Traiter chaque guilde pour ajouter les propriétés nécessaires (isOwner, hasAdminPerms, memberCount, isInServer)
+    const ADMINISTRATOR_PERMISSION = 0x8; // La valeur de la permission ADMINISTRATOR
 
-    const processedGuilds = guilds.map(g => {
+    const processedGuilds = await Promise.all(userGuilds.map(async g => {
       const hasAdminPerms = (parseInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
       const isOwner = g.owner;
-      const isInServer = true; // À remplacer par ta logique réelle
+
+      let memberCount = 0;
+      let isInServer = false;
+
+      // Vérifier si le bot est dans le serveur et obtenir le nombre de membres
+      if (BOT_TOKEN) {
+        try {
+          const botGuildResponse = await axios.get(`https://discord.com/api/guilds/${g.id}`, {
+            headers: {
+              Authorization: `Bot ${BOT_TOKEN}` // Utilise le token du bot
+            }
+          });
+          const botGuildData = botGuildResponse.data;
+          // approximate_member_count est plus fiable pour les grands serveurs sans intents spécifiques
+          memberCount = botGuildData.approximate_member_count || botGuildData.member_count || 0;
+          isInServer = true; // Si la requête réussit, le bot est dans le serveur
+        } catch (botError) {
+          // Le bot n'est pas dans le serveur ou n'a pas les permissions nécessaires
+          console.warn(`Bot not in guild ${g.name} (${g.id}) or error fetching details:`, botError.response ? botError.response.status : botError.message);
+          isInServer = false;
+        }
+      } else {
+        console.warn("BOT_TOKEN n'est pas défini. Impossible de vérifier la présence du bot ou le nombre de membres.");
+      }
+
       return {
         id: g.id,
         name: g.name,
         icon: g.icon,
-        memberCount: g.approximate_member_count || 0,
+        memberCount: memberCount,
         isOwner: isOwner,
         hasAdminPerms: hasAdminPerms,
         isInServer: isInServer
       };
-    });
+    }));
 
     // Renvoyer les données au frontend
     res.json({
       success: true,
       user: user,
-      guilds: processedGuilds
+      guilds: processedGuilds, // Envoyez la liste des guildes traitées
+      accessToken: access_token
     });
 
   } catch (error) {
-    console.error('Erreur lors de l\'authentification Discord:', error.response ? error.response.data : error.message);
+    console.error('Erreur lors de l\'authentification Discord :', error.response ? error.response.data : error.message);
     res.status(500).json({ success: false, error: 'Erreur lors de l\'authentification Discord.' });
+  }
+});
+
+// Exemple de route pour interagir avec la base de données (à adapter)
+app.get('/api/test-db', async (req, res) => {
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const [rows] = await connection.execute('SELECT 1 + 1 AS solution');
+    res.json({ success: true, message: 'Connexion DB réussie', solution: rows[0].solution });
+  } catch (error) {
+    console.error('Erreur lors du test de la DB :', error);
+    res.status(500).json({ success: false, error: 'Erreur de connexion ou de requête DB.' });
+  } finally {
+    if (connection) connection.end();
   }
 });
 
 // Démarrer le serveur
 app.listen(PORT, () => {
-  console.log(`Backend Discord OAuth écoutant sur le port ${PORT}`);
+  console.log(`Serveur backend démarré sur le port ${PORT}`);
 });
