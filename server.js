@@ -56,16 +56,31 @@ app.get('/api/discord-oauth', async (req, res) => {
         authorization: `${token_type} ${access_token}`
       }
     });
-
-    const guilds = guildsResponse.data;
-
+    let guilds = guildsResponse.data; // Récupère les guildes brutes
+    // Maintenant, nous allons traiter chaque guilde pour ajouter les propriétés nécessaires
+    const ADMINISTRATOR_PERMISSION = 0x8; // La valeur de la permission ADMINISTRATOR
+    const processedGuilds = guilds.map(g => {
+      const hasAdminPerms = (parseInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+      const isOwner = g.owner; // La propriété 'owner' est déjà fournie par Discord API
+      // Pour vérifier si le bot est dans le serveur, vous auriez besoin d'une logique côté bot
+      // ou d'une autre requête API. Pour l'instant, nous allons simuler ou laisser à false.
+      // Si vous avez une liste des serveurs où le bot est présent, vous pouvez l'utiliser ici.
+      const isInServer = true; // Placeholder: Vous devrez implémenter cette logique si nécessaire
+      return {
+        id: g.id,
+        name: g.name,
+        icon: g.icon,
+        memberCount: g.approximate_member_count || 0, // L'API Discord ne renvoie pas toujours member_count ici, il faut souvent une requête spécifique
+        isOwner: isOwner,
+        hasAdminPerms: hasAdminPerms,
+        isInServer: isInServer // Cette propriété doit être déterminée par votre bot
+      };
+    });
     // Renvoyer les données au frontend
     res.json({
       success: true,
       user: user,
-      guilds: guilds,
-      accessToken: access_token // Renvoyez l'access_token si dashboard-servers.html en a besoin
-    });
+      guilds: processedGuilds, // Envoyez la liste des guildes traitées
 
   } catch (error) {
     console.error('Erreur lors de l\'authentification Discord:', error.response ? error.response.data : error.message);
@@ -77,3 +92,4 @@ app.get('/api/discord-oauth', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Backend Discord OAuth écoutant sur le port ${PORT}`);
 });
+
