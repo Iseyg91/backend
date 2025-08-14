@@ -27,15 +27,15 @@ const DEFAULT_ECONOMY_SETTINGS = {
   },
   bonus_command: {
     embed_color: "#00ffcc",
-    success_message: "Félicitations ! Vous avez gagné {amount} {currency_symbol} !",
+    success_message: "Félicitations ! Vous avez gagné {amount} !",
     cooldown: 3600, // 1 heure
     min_gain: 100,
     max_gain: 500
   },
   quest_command: {
     embed_color: "#00ffcc",
-    success_message: "Vous avez réussi la quête et gagné {amount} {currency_symbol} !",
-    unsuccess_message: "Vous avez échoué la quête et perdu {amount} {currency_symbol} !", // Ajout du message d'échec
+    success_message: "Vous avez réussi la quête et gagné {amount} !",
+    unsuccess_message: "Vous avez échoué la quête et perdu {amount} !", // Ajout du message d'échec
     cooldown: 7200, // 2 heures
     min_negative: -50,
     max_negative: -10,
@@ -44,8 +44,8 @@ const DEFAULT_ECONOMY_SETTINGS = {
   },
   risk_command: {
     embed_color: "#00ffcc",
-    success_message: "Vous avez pris un risque et gagné {amount} {currency_symbol} !",
-    unsuccess_message: "Oh non ! Vous avez perdu {amount} {currency_symbol} !",
+    success_message: "Vous avez pris un risque et gagné {amount} !",
+    unsuccess_message: "Oh non ! Vous avez perdu {amount} !",
     cooldown: 10800, // 3 heures
     min_positive: 500,
     max_positive: 2000,
