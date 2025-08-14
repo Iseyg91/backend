@@ -88,6 +88,9 @@ app.get('/api/discord-oauth', async (req, res) => {
     const ADMINISTRATOR_PERMISSION = 0x8;
 
     // ✅ Utilisation du cache local du bot → pas de rate limit
+    // Assurez-vous que le bot est bien connecté avant d'accéder à bot.guilds.cache
+    // Le bot.once('ready') garantit cela pour le démarrage, mais pour les requêtes
+    // ultérieures, le cache est disponible.
     const botGuilds = bot.guilds.cache.map(g => ({
       id: g.id,
       name: g.name,
@@ -143,6 +146,38 @@ app.get('/api/test-db', async (req, res) => {
     if (connection) connection.end();
   }
 });
+
+// ----------------------
+// NOUVELLE ROUTE : Récupérer les informations d'une guilde par son ID
+// ----------------------
+app.get('/api/guilds/:guildId', async (req, res) => {
+  const guildId = req.params.guildId;
+  try {
+    // Vérifier si le bot est dans cette guilde et la récupérer depuis le cache
+    const guild = bot.guilds.cache.get(guildId);
+
+    if (!guild) {
+      // Si la guilde n'est pas trouvée dans le cache du bot,
+      // cela signifie que le bot n'est pas dans cette guilde ou que l'ID est invalide.
+      return res.status(404).json({ success: false, message: "Guilde non trouvée ou bot non présent." });
+    }
+
+    // Retourner les informations de base de la guilde
+    res.json({
+      success: true,
+      id: guild.id,
+      name: guild.name,
+      icon: guild.icon, // L'icône peut être null
+      memberCount: guild.memberCount
+      // Vous pouvez ajouter d'autres propriétés de la guilde si nécessaire
+    });
+
+  } catch (error) {
+    console.error(`Erreur lors de la récupération des informations de la guilde ${guildId} :`, error);
+    res.status(500).json({ success: false, error: 'Erreur interne du serveur.' });
+  }
+});
+
 
 // ----------------------
 // Routes pour paramètres d'économie
