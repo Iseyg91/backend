@@ -6,8 +6,8 @@ const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const { Client, GatewayIntentBits } = require('discord.js');
-// Importez les nouvelles fonctions
-const { getGuildSettings, updateGuildSettings, addCollectRole, deleteCollectRole } = require('./database');
+// Importez les fonctions mises à jour
+const { getGuildSettings, updateEmbedSettings, addCollectRole, deleteCollectRole } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -177,11 +177,11 @@ app.get('/api/guilds/:guildId', async (req, res) => {
 app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
   try {
+    // getGuildSettings va maintenant récupérer les embeds ET les rôles de collect
     const settings = await getGuildSettings(guildId);
-    if (settings) {
-      return res.json(settings);
-    }
-    return res.status(404).json({ message: "Aucun paramètre trouvé pour ce serveur." });
+    // getGuildSettings renvoie toujours un objet avec des valeurs par défaut si rien n'est trouvé
+    // Donc, pas besoin de vérifier 'null' ici, juste renvoyer les settings
+    return res.json(settings);
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Erreur lors de la récupération des paramètres." });
@@ -190,13 +190,16 @@ app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
 
 app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
-  const settings = req.body;
+  // Cette route ne gère que les paramètres d'embed
+  const { balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme } = req.body;
+  const embedSettings = { balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme };
+
   try {
-    await updateGuildSettings(guildId, settings);
-    return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
+    await updateEmbedSettings(guildId, embedSettings); // Utiliser la nouvelle fonction
+    return res.json({ message: "Paramètres d'Embed mis à jour avec succès." });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres." });
+    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'Embed." });
   }
 });
 
@@ -213,7 +216,6 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', async (req, res) 
     return res.status(400).json({ message: "Données de rôle de collect manquantes (role_id, amount, cooldown)." });
   }
 
-  // Valider que amount et cooldown sont des nombres positifs
   if (typeof amount !== 'number' || amount <= 0 || typeof cooldown !== 'number' || cooldown <= 0) {
       return res.status(400).json({ message: "Montant et cooldown doivent être des nombres positifs." });
   }
@@ -223,9 +225,8 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', async (req, res) 
     return res.status(201).json({ message: "Rôle de collect ajouté avec succès." });
   } catch (error) {
     console.error("Erreur lors de l'ajout du rôle de collect :", error);
-    // Gérer le cas où le rôle existe déjà
     if (error.message.includes("existe déjà")) {
-        return res.status(409).json({ message: error.message }); // 409 Conflict
+        return res.status(409).json({ message: error.message });
     }
     return res.status(500).json({ message: "Erreur lors de l'ajout du rôle de collect." });
   }
@@ -241,7 +242,6 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', async (
     return res.json({ message: "Rôle de collect supprimé avec succès." });
   } catch (error) {
     console.error("Erreur lors de la suppression du rôle de collect :", error);
-    // Gérer le cas où le rôle n'est pas trouvé
     if (error.message.includes("pas été trouvé")) {
         return res.status(404).json({ message: error.message });
     }
