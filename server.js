@@ -206,7 +206,7 @@ app.get('/api/guilds/:guildId/roles', authenticateToken, async (req, res) => {
       .map(role => ({
         id: role.id,
         name: role.name,
-        color: role.hexColor,
+        color: role.hexColor, // Inclure la couleur du rôle
         position: role.position
       }));
 
@@ -349,6 +349,16 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, async (req, res) 
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
     return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
   }
+  // Validation du stock
+  if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
+      return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
+  }
+  // Validation des requirements et actions (optionnel, mais bonne pratique)
+  if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
+  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = []; // Nouveau
+  if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
+  if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
+
 
   try {
     const newItem = await addShopItem(guildId, itemData);
@@ -367,6 +377,15 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, async (req
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
     return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
   }
+  // Validation du stock
+  if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
+      return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
+  }
+  // Validation des requirements et actions (optionnel)
+  if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
+  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = []; // Nouveau
+  if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
+  if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
 
   try {
     const updatedItem = await updateShopItem(guildId, itemId, itemData);
