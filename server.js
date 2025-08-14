@@ -7,7 +7,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const { Client, GatewayIntentBits } = require('discord.js');
 // Importez les fonctions mises à jour
-const { getGuildSettings, updateEmbedSettings, addCollectRole, deleteCollectRole } = require('./database');
+const { getGuildSettings, updateEconomySettings, addCollectRole, deleteCollectRole } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,7 +59,6 @@ app.get('/api/discord-oauth', async (req, res) => {
   }
 
   try {
-    // Échange code -> access_token
     const tokenResponse = await axios.post(
       'https://discord.com/api/oauth2/token',
       new URLSearchParams({
@@ -74,13 +73,11 @@ app.get('/api/discord-oauth', async (req, res) => {
 
     const { access_token, token_type } = tokenResponse.data;
 
-    // Infos utilisateur
     const userResponse = await axios.get('https://discord.com/api/users/@me', {
       headers: { authorization: `${token_type} ${access_token}` }
     });
     const user = userResponse.data;
 
-    // Guildes utilisateur
     const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
       headers: { authorization: `${token_type} ${access_token}` }
     });
@@ -172,39 +169,59 @@ app.get('/api/guilds/:guildId', async (req, res) => {
 
 
 // ----------------------
-// Routes pour paramètres d'économie (Embeds)
+// Routes pour paramètres d'économie (GET global, POST pour update l'objet JSON)
 // ----------------------
 app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
   try {
-    // getGuildSettings va maintenant récupérer les embeds ET les rôles de collect
-    const settings = await getGuildSettings(guildId);
-    // getGuildSettings renvoie toujours un objet avec des valeurs par défaut si rien n'est trouvé
-    // Donc, pas besoin de vérifier 'null' ici, juste renvoyer les settings
+    const settings = await getGuildSettings(guildId); // Cette fonction renvoie déjà les valeurs par défaut si rien n'est trouvé
     return res.json(settings);
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Erreur lors de la récupération des paramètres." });
+    console.error("Erreur lors de la récupération des paramètres d'économie :", error);
+    return res.status(500).json({ message: "Erreur lors de la récupération des paramètres d'économie." });
   }
 });
 
+// Route pour mettre à jour les paramètres d'économie (l'objet JSON complet)
 app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
-  // Cette route ne gère que les paramètres d'embed
-  const { balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme } = req.body;
-  const embedSettings = { balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme };
+  const newEconomySettings = req.body; // Le corps de la requête est le nouvel objet JSON complet
 
   try {
-    await updateEmbedSettings(guildId, embedSettings); // Utiliser la nouvelle fonction
-    return res.json({ message: "Paramètres d'Embed mis à jour avec succès." });
+    // Récupérer les paramètres actuels pour ne modifier que ce qui est envoyé
+    let currentSettings = await getGuildSettings(guildId);
+
+    // Fusionner les nouveaux paramètres avec les anciens
+    // Cela permet de ne pas écraser les parties non envoyées par le frontend
+    // Par exemple, si le frontend n'envoie que 'general_embeds', les autres commandes ne sont pas touchées.
+    // Cependant, pour une mise à jour complète d'une sous-section (ex: bonus_command),
+    // le frontend doit envoyer l'objet complet de cette sous-section.
+    const mergedSettings = { ...currentSettings };
+    for (const key in newEconomySettings) {
+        if (typeof newEconomySettings[key] === 'object' && !Array.isArray(newEconomySettings[key]) && mergedSettings[key]) {
+            // Fusionner les sous-objets (ex: bonus_command)
+            mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettings[key] };
+        } else {
+            // Remplacer les autres propriétés (ex: general_embeds, currency)
+            mergedSettings[key] = newEconomySettings[key];
+        }
+    }
+    // S'assurer que collect_roles n'est pas écrasé par cette route POST, car il est géré séparément
+    // (Le frontend n'enverra pas collect_roles via cette route POST)
+    mergedSettings.collect_roles = currentSettings.collect_roles;
+
+
+    await updateEconomySettings(guildId, mergedSettings); // Utiliser la nouvelle fonction
+    return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'Embed." });
+    console.error("Erreur lors de la mise à jour des paramètres d'économie :", error);
+    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'économie." });
   }
 });
 
+
 // ----------------------
-// NOUVELLES ROUTES : Gestion des rôles de collect
+// Routes spécifiques pour les rôles de collect (inchangées)
 // ----------------------
 
 // Route pour ajouter un rôle de collect
