@@ -63,7 +63,10 @@ const DEFAULT_SHOP_ITEM = {
   usable: true,
   inventory: true,
   price: 0,
+  stock: null, // null signifie illimité par défaut
+  unlimited_stock: true, // Nouveau champ pour indiquer si le stock est illimité
   requirements: [], // [{ type: "has_role", value: "role_id" }]
+  on_use_requirements: [], // Nouveau: conditions pour utiliser l'item
   on_purchase_actions: [], // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
   on_use_actions: [] // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
 };
@@ -217,12 +220,14 @@ async function addShopItem(guildId, itemData) {
   let connection;
   try {
     connection = await getDbConnection();
-    const itemJson = JSON.stringify({ ...DEFAULT_SHOP_ITEM, ...itemData }); // Fusionner avec les valeurs par défaut
+    // Fusionner avec les valeurs par défaut pour s'assurer que tous les champs sont présents
+    const mergedItemData = { ...DEFAULT_SHOP_ITEM, ...itemData };
+    const itemJson = JSON.stringify(mergedItemData);
     const [result] = await connection.execute(
       'INSERT INTO shop_items (guild_id, item_data) VALUES (?, ?)',
       [guildId, itemJson]
     );
-    return { id: result.insertId, ...itemData };
+    return { id: result.insertId, ...mergedItemData };
   } finally {
     if (connection) connection.end();
   }
@@ -237,7 +242,8 @@ async function updateShopItem(guildId, itemId, itemData) {
     if (!existingItem) {
       throw new Error("Article non trouvé.");
     }
-    const mergedItemData = { ...existingItem, ...itemData }; // Fusion simple pour l'exemple, une fusion profonde serait plus robuste
+    // Fusionner les données existantes avec les nouvelles données
+    const mergedItemData = { ...existingItem, ...itemData };
     const itemJson = JSON.stringify(mergedItemData);
 
     const [result] = await connection.execute(
