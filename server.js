@@ -6,19 +6,16 @@ const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const { Client, GatewayIntentBits } = require('discord.js');
-// Importez les fonctions mises à jour
 const { getGuildSettings, updateEconomySettings, addCollectRole, deleteCollectRole } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Discord OAuth2
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI;
+const REDIRECT_URI = process.env.REDIRECT_URI; // Assurez-vous que c'est toujours setup.html ou la page de redirection
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
-// MySQL
 const DB_HOST = process.env.DB_HOST;
 const DB_USER = process.env.DB_USER;
 const DB_PASSWORD = process.env.DB_PASSWORD;
@@ -40,9 +37,6 @@ async function getDbConnection() {
   return connection;
 }
 
-// ----------------------
-// Initialisation du bot Discord
-// ----------------------
 const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 bot.once('ready', () => {
@@ -50,7 +44,7 @@ bot.once('ready', () => {
 });
 
 // ----------------------
-// Route OAuth2
+// Route OAuth2 (inchangée, elle redirige toujours vers la page définie dans REDIRECT_URI)
 // ----------------------
 app.get('/api/discord-oauth', async (req, res) => {
   const code = req.query.code;
@@ -174,7 +168,7 @@ app.get('/api/guilds/:guildId', async (req, res) => {
 app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
   try {
-    const settings = await getGuildSettings(guildId); // Cette fonction renvoie déjà les valeurs par défaut si rien n'est trouvé
+    const settings = await getGuildSettings(guildId);
     return res.json(settings);
   } catch (error) {
     console.error("Erreur lors de la récupération des paramètres d'économie :", error);
@@ -182,28 +176,22 @@ app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
   }
 });
 
-// Route pour mettre à jour les paramètres d'économie (l'objet JSON complet)
 app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
-  const newEconomySettings = req.body; // Le corps de la requête est le nouvel objet JSON complet
+  const newEconomySettingsPayload = req.body; // Le corps de la requête est le payload partiel
 
   try {
-    // Récupérer les paramètres actuels pour ne modifier que ce qui est envoyé
-    let currentSettings = await getGuildSettings(guildId);
+    let currentSettings = await getGuildSettings(guildId); // Récupère les paramètres complets actuels
 
-    // Fusionner les nouveaux paramètres avec les anciens
-    // Cela permet de ne pas écraser les parties non envoyées par le frontend
-    // Par exemple, si le frontend n'envoie que 'general_embeds', les autres commandes ne sont pas touchées.
-    // Cependant, pour une mise à jour complète d'une sous-section (ex: bonus_command),
-    // le frontend doit envoyer l'objet complet de cette sous-section.
-    const mergedSettings = { ...currentSettings };
-    for (const key in newEconomySettings) {
-        if (typeof newEconomySettings[key] === 'object' && !Array.isArray(newEconomySettings[key]) && mergedSettings[key]) {
-            // Fusionner les sous-objets (ex: bonus_command)
-            mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettings[key] };
+    // Fusionner les nouveaux paramètres avec les anciens de manière profonde
+    const mergedSettings = { ...currentSettings }; // Clone les paramètres actuels
+    for (const key in newEconomySettingsPayload) {
+        if (typeof newEconomySettingsPayload[key] === 'object' && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
+            // Si la clé est un objet et existe déjà, fusionner ses propriétés
+            mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettingsPayload[key] };
         } else {
-            // Remplacer les autres propriétés (ex: general_embeds, currency)
-            mergedSettings[key] = newEconomySettings[key];
+            // Sinon, remplacer la propriété (pour les propriétés de premier niveau ou les tableaux)
+            mergedSettings[key] = newEconomySettingsPayload[key];
         }
     }
     // S'assurer que collect_roles n'est pas écrasé par cette route POST, car il est géré séparément
@@ -211,7 +199,7 @@ app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
     mergedSettings.collect_roles = currentSettings.collect_roles;
 
 
-    await updateEconomySettings(guildId, mergedSettings); // Utiliser la nouvelle fonction
+    await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
   } catch (error) {
     console.error("Erreur lors de la mise à jour des paramètres d'économie :", error);
@@ -224,7 +212,6 @@ app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
 // Routes spécifiques pour les rôles de collect (inchangées)
 // ----------------------
 
-// Route pour ajouter un rôle de collect
 app.post('/api/guilds/:guildId/settings/economy/collect_role', async (req, res) => {
   const guildId = req.params.guildId;
   const { role_id, amount, cooldown } = req.body;
@@ -249,7 +236,6 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', async (req, res) 
   }
 });
 
-// Route pour supprimer un rôle de collect
 app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', async (req, res) => {
   const guildId = req.params.guildId;
   const roleIdToDelete = req.params.roleId;
