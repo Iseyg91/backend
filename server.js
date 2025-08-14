@@ -6,7 +6,8 @@ const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const { Client, GatewayIntentBits } = require('discord.js');
-const { getGuildSettings, updateGuildSettings } = require('./database'); // <-- ajout
+// Importez les nouvelles fonctions
+const { getGuildSettings, updateGuildSettings, addCollectRole, deleteCollectRole } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -87,10 +88,6 @@ app.get('/api/discord-oauth', async (req, res) => {
 
     const ADMINISTRATOR_PERMISSION = 0x8;
 
-    // ✅ Utilisation du cache local du bot → pas de rate limit
-    // Assurez-vous que le bot est bien connecté avant d'accéder à bot.guilds.cache
-    // Le bot.once('ready') garantit cela pour le démarrage, mais pour les requêtes
-    // ultérieures, le cache est disponible.
     const botGuilds = bot.guilds.cache.map(g => ({
       id: g.id,
       name: g.name,
@@ -148,28 +145,23 @@ app.get('/api/test-db', async (req, res) => {
 });
 
 // ----------------------
-// NOUVELLE ROUTE : Récupérer les informations d'une guilde par son ID
+// Route : Récupérer les informations d'une guilde par son ID
 // ----------------------
 app.get('/api/guilds/:guildId', async (req, res) => {
   const guildId = req.params.guildId;
   try {
-    // Vérifier si le bot est dans cette guilde et la récupérer depuis le cache
     const guild = bot.guilds.cache.get(guildId);
 
     if (!guild) {
-      // Si la guilde n'est pas trouvée dans le cache du bot,
-      // cela signifie que le bot n'est pas dans cette guilde ou que l'ID est invalide.
       return res.status(404).json({ success: false, message: "Guilde non trouvée ou bot non présent." });
     }
 
-    // Retourner les informations de base de la guilde
     res.json({
       success: true,
       id: guild.id,
       name: guild.name,
-      icon: guild.icon, // L'icône peut être null
+      icon: guild.icon,
       memberCount: guild.memberCount
-      // Vous pouvez ajouter d'autres propriétés de la guilde si nécessaire
     });
 
   } catch (error) {
@@ -180,7 +172,7 @@ app.get('/api/guilds/:guildId', async (req, res) => {
 
 
 // ----------------------
-// Routes pour paramètres d'économie
+// Routes pour paramètres d'économie (Embeds)
 // ----------------------
 app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
   const guildId = req.params.guildId;
@@ -207,6 +199,56 @@ app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
     return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres." });
   }
 });
+
+// ----------------------
+// NOUVELLES ROUTES : Gestion des rôles de collect
+// ----------------------
+
+// Route pour ajouter un rôle de collect
+app.post('/api/guilds/:guildId/settings/economy/collect_role', async (req, res) => {
+  const guildId = req.params.guildId;
+  const { role_id, amount, cooldown } = req.body;
+
+  if (!role_id || !amount || !cooldown) {
+    return res.status(400).json({ message: "Données de rôle de collect manquantes (role_id, amount, cooldown)." });
+  }
+
+  // Valider que amount et cooldown sont des nombres positifs
+  if (typeof amount !== 'number' || amount <= 0 || typeof cooldown !== 'number' || cooldown <= 0) {
+      return res.status(400).json({ message: "Montant et cooldown doivent être des nombres positifs." });
+  }
+
+  try {
+    await addCollectRole(guildId, { role_id, amount, cooldown });
+    return res.status(201).json({ message: "Rôle de collect ajouté avec succès." });
+  } catch (error) {
+    console.error("Erreur lors de l'ajout du rôle de collect :", error);
+    // Gérer le cas où le rôle existe déjà
+    if (error.message.includes("existe déjà")) {
+        return res.status(409).json({ message: error.message }); // 409 Conflict
+    }
+    return res.status(500).json({ message: "Erreur lors de l'ajout du rôle de collect." });
+  }
+});
+
+// Route pour supprimer un rôle de collect
+app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', async (req, res) => {
+  const guildId = req.params.guildId;
+  const roleIdToDelete = req.params.roleId;
+
+  try {
+    await deleteCollectRole(guildId, roleIdToDelete);
+    return res.json({ message: "Rôle de collect supprimé avec succès." });
+  } catch (error) {
+    console.error("Erreur lors de la suppression du rôle de collect :", error);
+    // Gérer le cas où le rôle n'est pas trouvé
+    if (error.message.includes("pas été trouvé")) {
+        return res.status(404).json({ message: error.message });
+    }
+    return res.status(500).json({ message: "Erreur lors de la suppression du rôle de collect." });
+  }
+});
+
 
 // ----------------------
 // Lancement du serveur et du bot
