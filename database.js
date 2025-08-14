@@ -13,34 +13,75 @@ async function getDbConnection() {
   return connection;
 }
 
-// Fonction pour récupérer TOUS les paramètres d'une guilde
+// Valeurs par défaut pour les paramètres d'économie
+const DEFAULT_ECONOMY_SETTINGS = {
+  general_embeds: {
+    balance_embed_color: "#00ffcc",
+    balance_embed_theme: "default",
+    collect_embed_color: "#00ffcc",
+    collect_embed_theme: "default"
+  },
+  currency: {
+    name: "Crédits", // Nom par défaut
+    symbol: "💰" // Symbole par défaut
+  },
+  bonus_command: {
+    embed_color: "#00ffcc",
+    success_message: "Félicitations ! Vous avez gagné {amount} {currency_symbol} !",
+    cooldown: 3600, // 1 heure
+    min_gain: 100,
+    max_gain: 500
+  },
+  quest_command: {
+    embed_color: "#00ffcc",
+    success_message: "Vous avez réussi la quête et gagné {amount} {currency_symbol} !",
+    cooldown: 7200, // 2 heures
+    min_negative: -50,
+    max_negative: -10,
+    min_positive: 20,
+    max_positive: 100
+  },
+  risk_command: {
+    embed_color: "#00ffcc",
+    success_message: "Vous avez pris un risque et gagné {amount} {currency_symbol} !",
+    unsuccess_message: "Oh non ! Vous avez perdu {amount} {currency_symbol} !",
+    cooldown: 10800, // 3 heures
+    min_positive: 500,
+    max_positive: 2000,
+    min_negative: -200,
+    max_negative: -50
+  }
+};
+
+
+// Fonction pour récupérer TOUS les paramètres d'une guilde (y compris les rôles de collect)
 async function getGuildSettings(guildId) {
   let connection;
   try {
     connection = await getDbConnection();
 
-    // 1. Récupérer les paramètres d'embed de la table guild_settings
-    const [embedRows] = await connection.execute(
-      'SELECT balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme FROM guild_settings WHERE guild_id = ?',
+    // 1. Récupérer les paramètres d'économie JSON de la table guild_settings
+    const [economyRows] = await connection.execute(
+      'SELECT economy_settings FROM guild_settings WHERE guild_id = ?',
       [guildId]
     );
 
-    let settings = {};
-    if (embedRows.length > 0) {
-      settings = {
-        balance_embed_color: embedRows[0].balance_embed_color,
-        balance_embed_theme: embedRows[0].balance_embed_theme,
-        collect_embed_color: embedRows[0].collect_embed_color,
-        collect_embed_theme: embedRows[0].collect_embed_theme,
-      };
-    } else {
-      // Si aucun paramètre d'embed n'existe, retourner des valeurs par défaut
-      settings = {
-        balance_embed_color: "#00ffcc",
-        balance_embed_theme: "default",
-        collect_embed_color: "#00ffcc",
-        collect_embed_theme: "default",
-      };
+    let economySettings = DEFAULT_ECONOMY_SETTINGS; // Commencer avec les valeurs par défaut
+
+    if (economyRows.length > 0 && economyRows[0].economy_settings) {
+      try {
+        // Fusionner les paramètres existants avec les défauts pour s'assurer que toutes les clés sont présentes
+        economySettings = { ...DEFAULT_ECONOMY_SETTINGS, ...JSON.parse(economyRows[0].economy_settings) };
+        // S'assurer que les sous-objets sont également fusionnés si nécessaire
+        for (const key in DEFAULT_ECONOMY_SETTINGS) {
+            if (typeof DEFAULT_ECONOMY_SETTINGS[key] === 'object' && !Array.isArray(DEFAULT_ECONOMY_SETTINGS[key])) {
+                economySettings[key] = { ...DEFAULT_ECONOMY_SETTINGS[key], ...economySettings[key] };
+            }
+        }
+      } catch (parseError) {
+        console.error(`Erreur de parsing JSON pour economy_settings de la guilde ${guildId}:`, parseError);
+        // Si le JSON est invalide, on reste sur les DEFAULT_ECONOMY_SETTINGS
+      }
     }
 
     // 2. Récupérer les rôles de collect de la table collect_roles
@@ -49,31 +90,27 @@ async function getGuildSettings(guildId) {
       [guildId]
     );
 
-    settings.collect_roles = collectRolesRows; // Ajouter les rôles de collect à l'objet settings
+    economySettings.collect_roles = collectRolesRows; // Ajouter les rôles de collect à l'objet settings
 
-    return settings;
+    return economySettings;
 
   } finally {
     if (connection) connection.end();
   }
 }
 
-// Fonction pour mettre à jour les paramètres d'embed (balance_embed_color, etc.)
-async function updateEmbedSettings(guildId, embedSettings) {
+// Fonction pour mettre à jour les paramètres d'économie JSON
+async function updateEconomySettings(guildId, newEconomySettings) {
   let connection;
   try {
     connection = await getDbConnection();
-    const { balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme } = embedSettings;
+    const settingsJson = JSON.stringify(newEconomySettings);
 
     await connection.execute(
-      `INSERT INTO guild_settings (guild_id, balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-       balance_embed_color = VALUES(balance_embed_color),
-       balance_embed_theme = VALUES(balance_embed_theme),
-       collect_embed_color = VALUES(collect_embed_color),
-       collect_embed_theme = VALUES(collect_embed_theme)`,
-      [guildId, balance_embed_color, balance_embed_theme, collect_embed_color, collect_embed_theme]
+      `INSERT INTO guild_settings (guild_id, economy_settings)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE economy_settings = ?`,
+      [guildId, settingsJson, settingsJson]
     );
   } finally {
     if (connection) connection.end();
@@ -87,7 +124,6 @@ async function addCollectRole(guildId, roleData) {
     connection = await getDbConnection();
     const { role_id, amount, cooldown } = roleData;
 
-    // Vérifier si le rôle existe déjà pour cette guilde
     const [existingRoles] = await connection.execute(
       'SELECT role_id FROM collect_roles WHERE guild_id = ? AND role_id = ?',
       [guildId, role_id]
@@ -97,7 +133,6 @@ async function addCollectRole(guildId, roleData) {
       throw new Error("Ce rôle de collect existe déjà pour ce serveur.");
     }
 
-    // Insérer le nouveau rôle
     await connection.execute(
       'INSERT INTO collect_roles (guild_id, role_id, amount, cooldown) VALUES (?, ?, ?, ?)',
       [guildId, role_id, amount, cooldown]
@@ -127,7 +162,7 @@ async function deleteCollectRole(guildId, roleIdToDelete) {
 
 module.exports = {
   getGuildSettings,
-  updateEmbedSettings, // Renommé pour la clarté
+  updateEconomySettings, // Renommé et adapté
   addCollectRole,
   deleteCollectRole
 };
