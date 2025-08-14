@@ -23,26 +23,20 @@ const DB_USER = process.env.DB_USER;
 const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_NAME = process.env.DB_NAME;
 
-// Configuration CORS
-app.use(cors({
-    origin: 'https://project-delta.fr', // Remplacez par l'URL de votre frontend
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
+app.use(cors());
 app.use(express.json());
 
 const dbConfig = {
-    host: DB_HOST,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    database: DB_NAME
+  host: DB_HOST,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME
 };
 
 async function getDbConnection() {
-    const connection = await mysql.createConnection(dbConfig);
-    console.log('Connecté à MySQL !');
-    return connection;
+  const connection = await mysql.createConnection(dbConfig);
+  console.log('Connecté à MySQL !');
+  return connection;
 }
 
 // ----------------------
@@ -51,173 +45,139 @@ async function getDbConnection() {
 const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 bot.once('ready', () => {
-    console.log(`Bot connecté en tant que ${bot.user.tag}`);
+  console.log(`Bot connecté en tant que ${bot.user.tag}`);
 });
 
 // ----------------------
 // Route OAuth2
 // ----------------------
 app.get('/api/discord-oauth', async (req, res) => {
-    const code = req.query.code;
-    if (!code) {
-        return res.status(400).json({ success: false, error: 'Code non fourni.' });
-    }
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).json({ success: false, error: 'Code non fourni.' });
+  }
 
-    try {
-        // Échange code -> access_token
-        const tokenResponse = await axios.post(
-            'https://discord.com/api/oauth2/token',
-            new URLSearchParams({
-                client_id: CLIENT_ID,
-                client_secret: CLIENT_SECRET,
-                grant_type: 'authorization_code',
-                code: code,
-                redirect_uri: REDIRECT_URI
-            }).toString(),
-            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-        );
+  try {
+    // Échange code -> access_token
+    const tokenResponse = await axios.post(
+      'https://discord.com/api/oauth2/token',
+      new URLSearchParams({
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: REDIRECT_URI
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
 
-        const { access_token, token_type } = tokenResponse.data;
+    const { access_token, token_type } = tokenResponse.data;
 
-        // Infos utilisateur
-        const userResponse = await axios.get('https://discord.com/api/users/@me', {
-            headers: { authorization: `${token_type} ${access_token}` }
-        });
-        const user = userResponse.data;
+    // Infos utilisateur
+    const userResponse = await axios.get('https://discord.com/api/users/@me', {
+      headers: { authorization: `${token_type} ${access_token}` }
+    });
+    const user = userResponse.data;
 
-        // Guildes utilisateur
-        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
-            headers: { authorization: `${token_type} ${access_token}` }
-        });
-        const userGuilds = guildsResponse.data;
+    // Guildes utilisateur
+    const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+      headers: { authorization: `${token_type} ${access_token}` }
+    });
+    const userGuilds = guildsResponse.data;
 
-        const ADMINISTRATOR_PERMISSION = 0x8;
+    const ADMINISTRATOR_PERMISSION = 0x8;
 
-        // ✅ Utilisation du cache local du bot → pas de rate limit
-        const botGuilds = bot.guilds.cache.map(g => ({
-            id: g.id,
-            name: g.name,
-            memberCount: g.memberCount || 0
-        }));
+    // ✅ Utilisation du cache local du bot → pas de rate limit
+    const botGuilds = bot.guilds.cache.map(g => ({
+      id: g.id,
+      name: g.name,
+      memberCount: g.memberCount || 0
+    }));
 
-        const processedGuilds = userGuilds.map(g => {
-            const hasAdminPerms = (parseInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
-            const isOwner = g.owner;
+    const processedGuilds = userGuilds.map(g => {
+      const hasAdminPerms = (parseInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+      const isOwner = g.owner;
 
-            const botGuild = botGuilds.find(bg => bg.id === g.id);
+      const botGuild = botGuilds.find(bg => bg.id === g.id);
 
-            return {
-                id: g.id,
-                name: g.name,
-                icon: g.icon,
-                memberCount: botGuild ? botGuild.memberCount : 0,
-                isOwner,
-                hasAdminPerms,
-                isInServer: !!botGuild
-            };
-        });
+      return {
+        id: g.id,
+        name: g.name,
+        icon: g.icon,
+        memberCount: botGuild ? botGuild.memberCount : 0,
+        isOwner,
+        hasAdminPerms,
+        isInServer: !!botGuild
+      };
+    });
 
-        res.json({
-            success: true,
-            user,
-            guilds: processedGuilds,
-            accessToken: access_token
-        });
+    res.json({
+      success: true,
+      user,
+      guilds: processedGuilds,
+      accessToken: access_token
+    });
 
-    } catch (error) {
-        console.error('Erreur OAuth2 Discord :', error.response?.data || error.message);
-        res.status(500).json({
-            success: false,
-            error: error.response?.data?.error_description || 'Erreur lors de l\'authentification Discord.'
-        });
-    }
+  } catch (error) {
+    console.error('Erreur OAuth2 Discord :', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error_description || 'Erreur lors de l\'authentification Discord.'
+    });
+  }
 });
 
 // ----------------------
 // Test connexion DB
 // ----------------------
 app.get('/api/test-db', async (req, res) => {
-    let connection;
-    try {
-        connection = await getDbConnection();
-        const [rows] = await connection.execute('SELECT 1 + 1 AS solution');
-        res.json({ success: true, message: 'Connexion DB réussie', solution: rows[0].solution });
-    } catch (error) {
-        console.error('Erreur test DB :', error);
-        res.status(500).json({ success: false, error: 'Erreur de connexion ou requête DB.' });
-    } finally {
-        if (connection) connection.end();
-    }
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const [rows] = await connection.execute('SELECT 1 + 1 AS solution');
+    res.json({ success: true, message: 'Connexion DB réussie', solution: rows[0].solution });
+  } catch (error) {
+    console.error('Erreur test DB :', error);
+    res.status(500).json({ success: false, error: 'Erreur de connexion ou requête DB.' });
+  } finally {
+    if (connection) connection.end();
+  }
 });
 
 // ----------------------
 // Routes pour paramètres d'économie
 // ----------------------
 app.get('/api/guilds/:guildId/settings/economy', async (req, res) => {
-    const guildId = req.params.guildId;
-    try {
-        const settings = await getGuildSettings(guildId);
-        if (settings) {
-            return res.json(settings);
-        }
-        return res.status(404).json({ message: "Aucun paramètre trouvé pour ce serveur." });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: "Erreur lors de la récupération des paramètres." });
+  const guildId = req.params.guildId;
+  try {
+    const settings = await getGuildSettings(guildId);
+    if (settings) {
+      return res.json(settings);
     }
+    return res.status(404).json({ message: "Aucun paramètre trouvé pour ce serveur." });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erreur lors de la récupération des paramètres." });
+  }
 });
 
 app.post('/api/guilds/:guildId/settings/economy', async (req, res) => {
-    const guildId = req.params.guildId;
-    const settings = req.body;
-    try {
-        await updateGuildSettings(guildId, settings);
-        return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres." });
-    }
-});
-
-// ----------------------
-// Route pour récupérer les informations de la guilde
-// ----------------------
-app.get('/api/guilds/:guildId', async (req, res) => {
-    const guildId = req.params.guildId;
-    const accessToken = req.headers.authorization?.split(' ')[1]; // Récupérez le token
-
-    if (!accessToken) {
-        return res.status(401).json({ error: "Accès non autorisé. Token manquant." });
-    }
-
-    try {
-        // Appel à l'API Discord pour obtenir les détails de la guilde
-        const guildResponse = await axios.get(`https://discord.com/api/guilds/${guildId}`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-
-        if (guildResponse.status === 200) {
-            const guildData = guildResponse.data;
-            res.json({
-                id: guildData.id,
-                name: guildData.name,
-                icon: guildData.icon,
-                owner: guildData.owner
-            });
-        } else {
-            res.status(404).json({ error: "Guilde non trouvée." });
-        }
-    } catch (error) {
-        console.error("Erreur lors de la récupération des informations de guilde:", error);
-        res.status(500).json({ error: "Erreur interne du serveur." });
-    }
+  const guildId = req.params.guildId;
+  const settings = req.body;
+  try {
+    await updateGuildSettings(guildId, settings);
+    return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres." });
+  }
 });
 
 // ----------------------
 // Lancement du serveur et du bot
 // ----------------------
 app.listen(PORT, () => {
-    console.log(`Serveur backend démarré sur le port ${PORT}`);
+  console.log(`Serveur backend démarré sur le port ${PORT}`);
 });
 
 bot.login(BOT_TOKEN);
