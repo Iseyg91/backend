@@ -35,6 +35,7 @@ const DEFAULT_ECONOMY_SETTINGS = {
   quest_command: {
     embed_color: "#00ffcc",
     success_message: "Vous avez réussi la quête et gagné {amount} {currency_symbol} !",
+    unsuccess_message: "Vous avez échoué la quête et perdu {amount} {currency_symbol} !", // Ajout du message d'échec
     cooldown: 7200, // 2 heures
     min_negative: -50,
     max_negative: -10,
@@ -71,11 +72,16 @@ async function getGuildSettings(guildId) {
     if (economyRows.length > 0 && economyRows[0].economy_settings) {
       try {
         // Fusionner les paramètres existants avec les défauts pour s'assurer que toutes les clés sont présentes
-        economySettings = { ...DEFAULT_ECONOMY_SETTINGS, ...JSON.parse(economyRows[0].economy_settings) };
-        // S'assurer que les sous-objets sont également fusionnés si nécessaire
-        for (const key in DEFAULT_ECONOMY_SETTINGS) {
-            if (typeof DEFAULT_ECONOMY_SETTINGS[key] === 'object' && !Array.isArray(DEFAULT_ECONOMY_SETTINGS[key])) {
-                economySettings[key] = { ...DEFAULT_ECONOMY_SETTINGS[key], ...economySettings[key] };
+        // Effectuer une fusion profonde pour les objets imbriqués
+        const existingSettings = JSON.parse(economyRows[0].economy_settings);
+        economySettings = { ...DEFAULT_ECONOMY_SETTINGS }; // Clone les valeurs par défaut
+        for (const key in existingSettings) {
+            if (typeof existingSettings[key] === 'object' && !Array.isArray(existingSettings[key]) && economySettings[key]) {
+                // Si la clé est un objet et existe déjà dans les défauts, fusionner ses propriétés
+                economySettings[key] = { ...economySettings[key], ...existingSettings[key] };
+            } else {
+                // Sinon, remplacer la propriété (pour les propriétés de premier niveau ou les tableaux)
+                economySettings[key] = existingSettings[key];
             }
         }
       } catch (parseError) {
