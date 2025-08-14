@@ -1,4 +1,4 @@
-// database.js
+// backend/database.js
 const mysql = require('mysql2/promise');
 
 const dbConfig = {
@@ -27,15 +27,15 @@ const DEFAULT_ECONOMY_SETTINGS = {
   },
   bonus_command: {
     embed_color: "#00ffcc",
-    success_message: "Félicitations ! Vous avez gagné {amount} !",
+    success_message: "Félicitations ! Vous avez gagné {amount} {currency_symbol} !",
     cooldown: 3600, // 1 heure
     min_gain: 100,
     max_gain: 500
   },
   quest_command: {
     embed_color: "#00ffcc",
-    success_message: "Vous avez réussi la quête et gagné {amount} !",
-    unsuccess_message: "Vous avez échoué la quête et perdu {amount} !", // Ajout du message d'échec
+    success_message: "Vous avez réussi la quête et gagné {amount} {currency_symbol} !",
+    unsuccess_message: "Vous avez échoué la quête et perdu {amount} {currency_symbol} !", // Ajout du message d'échec
     cooldown: 7200, // 2 heures
     min_negative: -50,
     max_negative: -10,
@@ -44,14 +44,28 @@ const DEFAULT_ECONOMY_SETTINGS = {
   },
   risk_command: {
     embed_color: "#00ffcc",
-    success_message: "Vous avez pris un risque et gagné {amount} !",
-    unsuccess_message: "Oh non ! Vous avez perdu {amount} !",
+    success_message: "Vous avez pris un risque et gagné {amount} {currency_symbol} !",
+    unsuccess_message: "Oh non ! Vous avez perdu {amount} {currency_symbol} !",
     cooldown: 10800, // 3 heures
     min_positive: 500,
     max_positive: 2000,
     min_negative: -200,
     max_negative: -50
   }
+};
+
+// Valeurs par défaut pour un item de shop
+const DEFAULT_SHOP_ITEM = {
+  name: "Nouvel Article",
+  description: "",
+  image_url: "",
+  sellable: true,
+  usable: true,
+  inventory: true,
+  price: 0,
+  requirements: [], // [{ type: "has_role", value: "role_id" }]
+  on_purchase_actions: [], // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
+  on_use_actions: [] // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
 };
 
 
@@ -166,9 +180,104 @@ async function deleteCollectRole(guildId, roleIdToDelete) {
   }
 }
 
+// --- Fonctions pour la gestion du Shop ---
+
+async function getShopItems(guildId) {
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const [rows] = await connection.execute(
+      'SELECT id, item_data FROM shop_items WHERE guild_id = ?',
+      [guildId]
+    );
+    return rows.map(row => ({ id: row.id, ...JSON.parse(row.item_data) }));
+  } finally {
+    if (connection) connection.end();
+  }
+}
+
+async function getShopItemById(guildId, itemId) {
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const [rows] = await connection.execute(
+      'SELECT id, item_data FROM shop_items WHERE guild_id = ? AND id = ?',
+      [guildId, itemId]
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    return { id: rows[0].id, ...JSON.parse(rows[0].item_data) };
+  } finally {
+    if (connection) connection.end();
+  }
+}
+
+async function addShopItem(guildId, itemData) {
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const itemJson = JSON.stringify({ ...DEFAULT_SHOP_ITEM, ...itemData }); // Fusionner avec les valeurs par défaut
+    const [result] = await connection.execute(
+      'INSERT INTO shop_items (guild_id, item_data) VALUES (?, ?)',
+      [guildId, itemJson]
+    );
+    return { id: result.insertId, ...itemData };
+  } finally {
+    if (connection) connection.end();
+  }
+}
+
+async function updateShopItem(guildId, itemId, itemData) {
+  let connection;
+  try {
+    connection = await getDbConnection();
+    // Récupérer l'item existant pour une fusion profonde si nécessaire
+    const existingItem = await getShopItemById(guildId, itemId);
+    if (!existingItem) {
+      throw new Error("Article non trouvé.");
+    }
+    const mergedItemData = { ...existingItem, ...itemData }; // Fusion simple pour l'exemple, une fusion profonde serait plus robuste
+    const itemJson = JSON.stringify(mergedItemData);
+
+    const [result] = await connection.execute(
+      'UPDATE shop_items SET item_data = ? WHERE guild_id = ? AND id = ?',
+      [itemJson, guildId, itemId]
+    );
+    if (result.affectedRows === 0) {
+      throw new Error("Article non trouvé ou aucune modification effectuée.");
+    }
+    return { id: itemId, ...mergedItemData };
+  } finally {
+    if (connection) connection.end();
+  }
+}
+
+async function deleteShopItem(guildId, itemId) {
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const [result] = await connection.execute(
+      'DELETE FROM shop_items WHERE guild_id = ? AND id = ?',
+      [guildId, itemId]
+    );
+    if (result.affectedRows === 0) {
+      throw new Error("Article non trouvé ou n'a pas pu être supprimé.");
+    }
+  } finally {
+    if (connection) connection.end();
+  }
+}
+
+
 module.exports = {
   getGuildSettings,
-  updateEconomySettings, // Renommé et adapté
+  updateEconomySettings,
   addCollectRole,
-  deleteCollectRole
+  deleteCollectRole,
+  getShopItems,
+  getShopItemById,
+  addShopItem,
+  updateShopItem,
+  deleteShopItem
 };
