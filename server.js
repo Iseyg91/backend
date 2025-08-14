@@ -121,7 +121,7 @@ app.get('/api/discord-oauth', async (req, res) => {
             success: true,
             user,
             guilds: processedGuilds,
-            accessToken: access_token
+            accessToken: access_token // Assurez-vous que le token est renvoyé ici
         });
 
     } catch (error) {
