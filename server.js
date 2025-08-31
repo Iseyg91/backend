@@ -5,17 +5,17 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js'); // Ajout de PermissionsBitField
+const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const { 
   getGuildSettings, 
   updateEconomySettings, 
   addCollectRole, 
   deleteCollectRole,
-  getShopItems, // Nouveau
-  getShopItemById, // Nouveau
-  addShopItem, // Nouveau
-  updateShopItem, // Nouveau
-  deleteShopItem // Nouveau
+  getShopItems,
+  getShopItemById,
+  addShopItem,
+  updateShopItem,
+  deleteShopItem
 } = require('./database');
 
 const app = express();
@@ -23,7 +23,7 @@ const PORT = process.env.PORT || 3000;
 
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI; // Assurez-vous que c'est toujours setup.html ou la page de redirection
+const REDIRECT_URI = process.env.REDIRECT_URI;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
 const DB_HOST = process.env.DB_HOST;
@@ -54,7 +54,7 @@ bot.once('ready', () => {
 });
 
 // ----------------------
-// Middleware d'authentification (simplifié pour l'exemple)
+// Middleware d'authentification
 // ----------------------
 async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -63,14 +63,62 @@ async function authenticateToken(req, res, next) {
   if (token == null) return res.sendStatus(401); // Pas de token
 
   // Dans un vrai projet, vous vérifieriez ce token avec Discord ou votre propre système de session.
-  // Pour cet exemple, nous allons simplement le laisser passer si présent,
-  // car la vérification réelle des permissions se fera sur les routes spécifiques.
-  req.accessToken = token; // Stocker le token pour une utilisation ultérieure
+  // Pour cet exemple, nous allons simplement le stocker.
+  req.accessToken = token;
   next();
 }
 
 // ----------------------
-// Route OAuth2 (inchangée, elle redirige toujours vers la page définie dans REDIRECT_URI)
+// Middleware de vérification des permissions d'administrateur de guilde
+// ----------------------
+async function checkGuildAdminPermissions(req, res, next) {
+  const guildId = req.params.guildId;
+  const accessToken = req.accessToken; // Récupéré par authenticateToken
+
+  if (!guildId || !accessToken) {
+    return res.status(400).json({ message: "ID de guilde ou jeton d'accès manquant." });
+  }
+
+  try {
+    // 1. Récupérer les guildes de l'utilisateur via l'API Discord
+    const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+    const userGuilds = guildsResponse.data;
+
+    // 2. Trouver la guilde spécifique et vérifier les permissions
+    const ADMINISTRATOR_PERMISSION = PermissionsBitField.Flags.Administrator;
+    const targetGuild = userGuilds.find(g => g.id === guildId);
+
+    if (!targetGuild) {
+      return res.status(403).json({ message: "Accès refusé : Guilde non trouvée pour cet utilisateur." });
+    }
+
+    const hasAdminPerms = (BigInt(targetGuild.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+    const isOwner = targetGuild.owner;
+
+    if (!hasAdminPerms && !isOwner) {
+      return res.status(403).json({ message: "Accès refusé : Vous n'avez pas les permissions d'administrateur sur cette guilde." });
+    }
+
+    // 3. Vérifier si le bot est dans la guilde
+    const botGuild = bot.guilds.cache.get(guildId);
+    if (!botGuild) {
+      return res.status(404).json({ message: "Le bot n'est pas présent sur ce serveur." });
+    }
+
+    // Si tout est bon, passer au middleware/route suivant
+    next();
+
+  } catch (error) {
+    console.error(`Erreur lors de la vérification des permissions pour la guilde ${guildId}:`, error.response?.data || error.message);
+    res.status(500).json({ message: "Erreur interne du serveur lors de la vérification des permissions." });
+  }
+}
+
+
+// ----------------------
+// Route OAuth2
 // ----------------------
 app.get('/api/discord-oauth', async (req, res) => {
   const code = req.query.code;
@@ -103,7 +151,7 @@ app.get('/api/discord-oauth', async (req, res) => {
     });
     const userGuilds = guildsResponse.data;
 
-    const ADMINISTRATOR_PERMISSION = PermissionsBitField.Flags.Administrator; // Utilisation de PermissionsBitField
+    const ADMINISTRATOR_PERMISSION = PermissionsBitField.Flags.Administrator;
 
     const botGuilds = bot.guilds.cache.map(g => ({
       id: g.id,
@@ -112,7 +160,7 @@ app.get('/api/discord-oauth', async (req, res) => {
     }));
 
     const processedGuilds = userGuilds.map(g => {
-      const hasAdminPerms = (BigInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION; // Utilisation de BigInt
+      const hasAdminPerms = (BigInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
       const isOwner = g.owner;
 
       const botGuild = botGuilds.find(bg => bg.id === g.id);
@@ -164,7 +212,8 @@ app.get('/api/test-db', async (req, res) => {
 // ----------------------
 // Route : Récupérer les informations d'une guilde par son ID
 // ----------------------
-app.get('/api/guilds/:guildId', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.get('/api/guilds/:guildId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
     const guild = bot.guilds.cache.get(guildId);
@@ -190,7 +239,8 @@ app.get('/api/guilds/:guildId', authenticateToken, async (req, res) => {
 // ----------------------
 // Route : Récupérer les rôles d'une guilde par son ID
 // ----------------------
-app.get('/api/guilds/:guildId/roles', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
     const guild = bot.guilds.cache.get(guildId);
@@ -222,7 +272,8 @@ app.get('/api/guilds/:guildId/roles', authenticateToken, async (req, res) => {
 // ----------------------
 // Routes pour paramètres d'économie (GET global, POST pour update l'objet JSON)
 // ----------------------
-app.get('/api/guilds/:guildId/settings/economy', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
     const settings = await getGuildSettings(guildId);
@@ -233,28 +284,22 @@ app.get('/api/guilds/:guildId/settings/economy', authenticateToken, async (req, 
   }
 });
 
-app.post('/api/guilds/:guildId/settings/economy', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
-  const newEconomySettingsPayload = req.body; // Le corps de la requête est le payload partiel
+  const newEconomySettingsPayload = req.body;
 
   try {
-    let currentSettings = await getGuildSettings(guildId); // Récupère les paramètres complets actuels
-
-    // Fusionner les nouveaux paramètres avec les anciens de manière profonde
-    const mergedSettings = { ...currentSettings }; // Clone les paramètres actuels
+    let currentSettings = await getGuildSettings(guildId);
+    const mergedSettings = { ...currentSettings };
     for (const key in newEconomySettingsPayload) {
         if (typeof newEconomySettingsPayload[key] === 'object' && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
-            // Si la clé est un objet et existe déjà, fusionner ses propriétés
-            mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettingsPayload[key] };
-        } else {
-            // Sinon, remplacer la propriété (pour les propriétés de premier niveau ou les tableaux)
-            mergedSettings[key] = newEconomySettingsPayload[key];
+                mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettingsPayload[key] };
+            } else {
+                mergedSettings[key] = newEconomySettingsPayload[key];
+            }
         }
-    }
-    // S'assurer que collect_roles n'est pas écrasé par cette route POST, car il est géré séparément
-    // (Le frontend n'enverra pas collect_roles via cette route POST)
-    mergedSettings.collect_roles = currentSettings.collect_roles;
-
+    mergedSettings.collect_roles = currentSettings.collect_roles; // Ne pas écraser les rôles de collect ici
 
     await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
@@ -266,10 +311,10 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, async (req,
 
 
 // ----------------------
-// Routes spécifiques pour les rôles de collect (inchangées)
+// Routes spécifiques pour les rôles de collect
 // ----------------------
-
-app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const { role_id, amount, cooldown } = req.body;
 
@@ -293,7 +338,8 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
   }
 });
 
-app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const roleIdToDelete = req.params.roleId;
 
@@ -314,7 +360,8 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
 // ----------------------
 
 // GET tous les items du shop
-app.get('/api/guilds/:guildId/shop/items', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
     const items = await getShopItems(guildId);
@@ -326,7 +373,8 @@ app.get('/api/guilds/:guildId/shop/items', authenticateToken, async (req, res) =
 });
 
 // GET un item spécifique du shop
-app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   try {
     const item = await getShopItemById(guildId, itemId);
@@ -341,21 +389,19 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, async (req
 });
 
 // POST (ajouter) un item au shop
-app.post('/api/guilds/:guildId/shop/items', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
-  const itemData = req.body; // Le corps de la requête contient les données de l'item
+  const itemData = req.body;
 
-  // Validation basique des données de l'item
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
     return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
   }
-  // Validation du stock
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
       return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
   }
-  // Validation des requirements et actions (optionnel, mais bonne pratique)
   if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
-  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = []; // Nouveau
+  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
   if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
 
@@ -370,20 +416,19 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, async (req, res) 
 });
 
 // PUT (modifier) un item du shop
-app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   const itemData = req.body;
 
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
     return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
   }
-  // Validation du stock
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
       return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
   }
-  // Validation des requirements et actions (optionnel)
   if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
-  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = []; // Nouveau
+  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
   if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
 
@@ -400,7 +445,8 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, async (req
 });
 
 // DELETE un item du shop
-app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, async (req, res) => {
+// Appliquer le middleware de vérification des permissions
+app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   try {
     await deleteShopItem(guildId, itemId);
@@ -423,3 +469,4 @@ app.listen(PORT, () => {
 });
 
 bot.login(BOT_TOKEN);
+
