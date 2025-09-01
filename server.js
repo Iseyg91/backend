@@ -355,6 +355,17 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
   }
 });
 
+// Fonction utilitaire pour nettoyer et standardiser les URLs d'emojis Discord
+function standardizeDiscordEmojiUrl(url) {
+  const discordEmojiUrlMatch = url.match(/^https:\/\/cdn\.discordapp\.com\/emojis\/(\d+)\.(png|gif|webp)(\?.*)?$/);
+  if (discordEmojiUrlMatch) {
+    const emojiId = discordEmojiUrlMatch[1];
+    const isAnimated = discordEmojiUrlMatch[2] === 'gif' || (discordEmojiUrlMatch[3] && discordEmojiUrlMatch[3].includes('animated=true'));
+    return `https://cdn.discordapp.com/emojis/${emojiId}.${isAnimated ? 'gif' : 'png'}`;
+  }
+  return url; // Retourne l'URL originale si ce n'est pas une URL d'emoji Discord
+}
+
 // ----------------------
 // Routes pour la gestion du Shop
 // ----------------------
@@ -405,6 +416,10 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
   if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
 
+  // Standardiser l'URL de l'image/emoji avant de l'enregistrer
+  if (itemData.image_url) {
+    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
+  }
 
   try {
     const newItem = await addShopItem(guildId, itemData);
@@ -431,6 +446,11 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
   if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
+
+  // Standardiser l'URL de l'image/emoji avant de l'enregistrer
+  if (itemData.image_url) {
+    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
+  }
 
   try {
     const updatedItem = await updateShopItem(guildId, itemId, itemData);
@@ -469,4 +489,3 @@ app.listen(PORT, () => {
 });
 
 bot.login(BOT_TOKEN);
-
