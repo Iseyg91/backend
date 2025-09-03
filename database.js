@@ -66,7 +66,7 @@ const DEFAULT_ECONOMY_SETTINGS = {
     min_bet: 1,
     max_bet: 500,
     rows: 8, // Nombre de lignes de pins
-    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10] // Multiplicateurs pour les slots du bas
+    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10] // Multiplicateurs pour les slots du bas (maintenant un tableau simple)
   },
   roulette_game: {
     embed_color: "#0000FF",
