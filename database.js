@@ -19,8 +19,7 @@ const DEFAULT_ECONOMY_SETTINGS = {
     balance_embed_color: "#00ffcc",
     balance_embed_theme: "default",
     collect_embed_color: "#00ffcc",
-    collect_embed_theme: "default",
-    shop_embed_color: "#00ffcc" // Ajouté pour la cohérence
+    collect_embed_theme: "default"
   },
   currency: {
     name: "Crédits", // Nom par défaut
@@ -61,7 +60,7 @@ const DEFAULT_SHOP_ITEM = {
   description: "",
   image_url: "",
   sellable: true,
-  usable: false, // Par défaut, un nouvel item n'est pas utilisable
+  usable: true,
   inventory: true,
   price: 0,
   stock: null, // null signifie illimité par défaut
@@ -222,7 +221,6 @@ async function addShopItem(guildId, itemData) {
   try {
     connection = await getDbConnection();
     // Fusionner avec les valeurs par défaut pour s'assurer que tous les champs sont présents
-    // Utiliser une fusion profonde pour les objets imbriqués si nécessaire, mais pour DEFAULT_SHOP_ITEM, une fusion superficielle suffit
     const mergedItemData = { ...DEFAULT_SHOP_ITEM, ...itemData };
     const itemJson = JSON.stringify(mergedItemData);
     const [result] = await connection.execute(
@@ -245,7 +243,6 @@ async function updateShopItem(guildId, itemId, itemData) {
       throw new Error("Article non trouvé.");
     }
     // Fusionner les données existantes avec les nouvelles données
-    // Cela permet de conserver les propriétés non modifiées
     const mergedItemData = { ...existingItem, ...itemData };
     const itemJson = JSON.stringify(mergedItemData);
 
@@ -290,4 +287,3 @@ module.exports = {
   updateShopItem,
   deleteShopItem
 };
-
