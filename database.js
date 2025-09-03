@@ -51,6 +51,39 @@ const DEFAULT_ECONOMY_SETTINGS = {
     max_positive: 2000,
     min_negative: -200,
     max_negative: -50
+  },
+  // Nouvelle section pour les jeux
+  crash_game: {
+    embed_color: "#FF0000",
+    min_bet: 1,
+    max_bet: 1000,
+    min_multiplier: 1.01,
+    max_multiplier: 100,
+    crash_chance: 50 // Probabilité que le jeu crash tôt (en %)
+  },
+  plinko_game: {
+    embed_color: "#00FF00",
+    min_bet: 1,
+    max_bet: 500,
+    rows: 8, // Nombre de lignes de pins
+    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10] // Multiplicateurs pour les slots du bas
+  },
+  roulette_game: {
+    embed_color: "#0000FF",
+    min_bet: 1,
+    max_bet: 2000,
+    outcomes: [ // Définition des résultats (couleur, multiplicateur, numéros)
+      {"color": "red", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
+      {"color": "black", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
+      {"color": "green", "multiplier": 14, "numbers": [0]}
+    ]
+  },
+  dice_game: {
+    embed_color: "#FFFF00",
+    min_bet: 1,
+    max_bet: 100,
+    min_roll: 1, // Minimum que l'utilisateur peut prédire
+    max_roll: 99 // Maximum que l'utilisateur peut prédire
   }
 };
 
@@ -162,7 +195,9 @@ async function addCollectRole(guildId, roleData) {
       [guildId, role_id, amount, cooldown]
     );
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
@@ -180,7 +215,9 @@ async function deleteCollectRole(guildId, roleIdToDelete) {
       throw new Error("Le rôle spécifié n'a pas été trouvé ou n'a pas pu être supprimé.");
     }
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
@@ -196,7 +233,9 @@ async function getShopItems(guildId) {
     );
     return rows.map(row => ({ id: row.id, ...JSON.parse(row.item_data) }));
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
@@ -213,7 +252,9 @@ async function getShopItemById(guildId, itemId) {
     }
     return { id: rows[0].id, ...JSON.parse(rows[0].item_data) };
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
@@ -230,7 +271,9 @@ async function addShopItem(guildId, itemData) {
     );
     return { id: result.insertId, ...mergedItemData };
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
@@ -256,7 +299,9 @@ async function updateShopItem(guildId, itemId, itemData) {
     }
     return { id: itemId, ...mergedItemData };
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
@@ -272,7 +317,9 @@ async function deleteShopItem(guildId, itemId) {
       throw new Error("Article non trouvé ou n'a pas pu être supprimé.");
     }
   } finally {
-    if (connection) connection.end();
+    if (connection) {
+      connection.end();
+    }
   }
 }
 
