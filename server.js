@@ -5,7 +5,9 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
+const { 
+  Client, GatewayIntentBits, PermissionsBitField 
+} = require('discord.js');
 const { 
   getGuildSettings, 
   updateEconomySettings, 
@@ -62,8 +64,6 @@ async function authenticateToken(req, res, next) {
 
   if (token == null) return res.sendStatus(401); // Pas de token
 
-  // Dans un vrai projet, vous vérifieriez ce token avec Discord ou votre propre système de session.
-  // Pour cet exemple, nous allons simplement le stocker.
   req.accessToken = token;
   next();
 }
@@ -73,20 +73,18 @@ async function authenticateToken(req, res, next) {
 // ----------------------
 async function checkGuildAdminPermissions(req, res, next) {
   const guildId = req.params.guildId;
-  const accessToken = req.accessToken; // Récupéré par authenticateToken
+  const accessToken = req.accessToken;
 
   if (!guildId || !accessToken) {
     return res.status(400).json({ message: "ID de guilde ou jeton d'accès manquant." });
   }
 
   try {
-    // 1. Récupérer les guildes de l'utilisateur via l'API Discord
     const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
       headers: { authorization: `Bearer ${accessToken}` }
     });
     const userGuilds = guildsResponse.data;
 
-    // 2. Trouver la guilde spécifique et vérifier les permissions
     const ADMINISTRATOR_PERMISSION = PermissionsBitField.Flags.Administrator;
     const targetGuild = userGuilds.find(g => g.id === guildId);
 
@@ -101,13 +99,11 @@ async function checkGuildAdminPermissions(req, res, next) {
       return res.status(403).json({ message: "Accès refusé : Vous n'avez pas les permissions d'administrateur sur cette guilde." });
     }
 
-    // 3. Vérifier si le bot est dans la guilde
     const botGuild = bot.guilds.cache.get(guildId);
     if (!botGuild) {
       return res.status(404).json({ message: "Le bot n'est pas présent sur ce serveur." });
     }
 
-    // Si tout est bon, passer au middleware/route suivant
     next();
 
   } catch (error) {
@@ -212,7 +208,6 @@ app.get('/api/test-db', async (req, res) => {
 // ----------------------
 // Route : Récupérer les informations d'une guilde par son ID
 // ----------------------
-// Appliquer le middleware de vérification des permissions
 app.get('/api/guilds/:guildId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
@@ -239,7 +234,6 @@ app.get('/api/guilds/:guildId', authenticateToken, checkGuildAdminPermissions, a
 // ----------------------
 // Route : Récupérer les rôles d'une guilde par son ID
 // ----------------------
-// Appliquer le middleware de vérification des permissions
 app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
@@ -249,14 +243,13 @@ app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissi
       return res.status(404).json({ success: false, message: "Guilde non trouvée ou bot non présent." });
     }
 
-    // Récupérer les rôles et les trier par position (du plus haut au plus bas)
     const roles = guild.roles.cache
-      .filter(role => !role.managed && role.id !== guild.id) // Exclure les rôles gérés par des intégrations et @everyone
+      .filter(role => !role.managed && role.id !== guild.id)
       .sort((a, b) => b.position - a.position)
       .map(role => ({
         id: role.id,
         name: role.name,
-        color: role.hexColor, // Inclure la couleur du rôle
+        color: role.hexColor,
         position: role.position
       }));
 
@@ -272,7 +265,6 @@ app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissi
 // ----------------------
 // Routes pour paramètres d'économie (GET global, POST pour update l'objet JSON)
 // ----------------------
-// Appliquer le middleware de vérification des permissions
 app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
@@ -284,7 +276,6 @@ app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAd
   }
 });
 
-// Appliquer le middleware de vérification des permissions
 app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const newEconomySettingsPayload = req.body;
@@ -293,18 +284,13 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
     let currentSettings = await getGuildSettings(guildId);
     const mergedSettings = { ...currentSettings };
     for (const key in newEconomySettingsPayload) {
-        if (typeof newEconomySettingsPayload[key] === 'object' && newEconomySettingsPayload[key] !== null && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
+        if (typeof newEconomySettingsPayload[key] === 'object' && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
                 mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettingsPayload[key] };
             } else {
                 mergedSettings[key] = newEconomySettingsPayload[key];
             }
         }
-    mergedSettings.collect_roles = currentSettings.collect_roles; // Ne pas écraser les rôles de collect ici
-    // Assurez-vous que les permissions sont également fusionnées correctement
-    if (newEconomySettingsPayload.permissions && typeof newEconomySettingsPayload.permissions === 'object') {
-        mergedSettings.permissions = { ...mergedSettings.permissions, ...newEconomySettingsPayload.permissions };
-    }
-
+    mergedSettings.collect_roles = currentSettings.collect_roles;
 
     await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
@@ -318,7 +304,6 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
 // ----------------------
 // Routes spécifiques pour les rôles de collect
 // ----------------------
-// Appliquer le middleware de vérification des permissions
 app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const { role_id, amount, cooldown } = req.body;
@@ -343,7 +328,6 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
   }
 });
 
-// Appliquer le middleware de vérification des permissions
 app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const roleIdToDelete = req.params.roleId;
@@ -368,7 +352,7 @@ function standardizeDiscordEmojiUrl(url) {
     const isAnimated = discordEmojiUrlMatch[2] === 'gif' || (discordEmojiUrlMatch[3] && discordEmojiUrlMatch[3].includes('animated=true'));
     return `https://cdn.discordapp.com/emojis/${emojiId}.${isAnimated ? 'gif' : 'png'}`;
   }
-  return url; // Retourne l'URL originale si ce n'est pas une URL d'emoji Discord
+  return url;
 }
 
 // ----------------------
@@ -376,7 +360,6 @@ function standardizeDiscordEmojiUrl(url) {
 // ----------------------
 
 // GET tous les items du shop
-// Appliquer le middleware de vérification des permissions
 app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
@@ -389,7 +372,6 @@ app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPer
 });
 
 // GET un item spécifique du shop
-// Appliquer le middleware de vérification des permissions
 app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   try {
@@ -405,7 +387,6 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
 });
 
 // POST (ajouter) un item au shop
-// Appliquer le middleware de vérification des permissions
 app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const itemData = req.body;
@@ -416,9 +397,9 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
       return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
   }
-  // Validation pour max_quantity_per_purchase
-  if (itemData.max_quantity_per_purchase !== null && (typeof itemData.max_quantity_per_purchase !== 'number' || itemData.max_quantity_per_purchase <= 0)) {
-      return res.status(400).json({ message: "La quantité maximale par achat doit être un nombre positif ou null." });
+  // Validation pour max_purchase_per_transaction
+  if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction <= 0)) {
+    return res.status(400).json({ message: "La quantité maximale par transaction doit être un nombre positif ou nulle pour illimité." });
   }
 
   if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
@@ -426,7 +407,6 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
   if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
 
-  // Standardiser l'URL de l'image/emoji avant de l'enregistrer
   if (itemData.image_url) {
     itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
   }
@@ -441,7 +421,6 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
 });
 
 // PUT (modifier) un item du shop
-// Appliquer le middleware de vérification des permissions
 app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   const itemData = req.body;
@@ -452,9 +431,9 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
       return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
   }
-  // Validation pour max_quantity_per_purchase
-  if (itemData.max_quantity_per_purchase !== null && (typeof itemData.max_quantity_per_purchase !== 'number' || itemData.max_quantity_per_purchase <= 0)) {
-      return res.status(400).json({ message: "La quantité maximale par achat doit être un nombre positif ou null." });
+  // Validation pour max_purchase_per_transaction
+  if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction <= 0)) {
+    return res.status(400).json({ message: "La quantité maximale par transaction doit être un nombre positif ou nulle pour illimité." });
   }
 
   if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
@@ -462,7 +441,6 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
   if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
 
-  // Standardiser l'URL de l'image/emoji avant de l'enregistrer
   if (itemData.image_url) {
     itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
   }
@@ -480,7 +458,6 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
 });
 
 // DELETE un item du shop
-// Appliquer le middleware de vérification des permissions
 app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   try {
