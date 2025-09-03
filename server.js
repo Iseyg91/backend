@@ -489,4 +489,3 @@ app.listen(PORT, () => {
 });
 
 bot.login(BOT_TOKEN);
-
