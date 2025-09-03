@@ -293,13 +293,18 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
     let currentSettings = await getGuildSettings(guildId);
     const mergedSettings = { ...currentSettings };
     for (const key in newEconomySettingsPayload) {
-        if (typeof newEconomySettingsPayload[key] === 'object' && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
+        if (typeof newEconomySettingsPayload[key] === 'object' && newEconomySettingsPayload[key] !== null && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
                 mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettingsPayload[key] };
             } else {
                 mergedSettings[key] = newEconomySettingsPayload[key];
             }
         }
     mergedSettings.collect_roles = currentSettings.collect_roles; // Ne pas écraser les rôles de collect ici
+    // Assurez-vous que les permissions sont également fusionnées correctement
+    if (newEconomySettingsPayload.permissions && typeof newEconomySettingsPayload.permissions === 'object') {
+        mergedSettings.permissions = { ...mergedSettings.permissions, ...newEconomySettingsPayload.permissions };
+    }
+
 
     await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
@@ -411,6 +416,11 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
       return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
   }
+  // Validation pour max_quantity_per_purchase
+  if (itemData.max_quantity_per_purchase !== null && (typeof itemData.max_quantity_per_purchase !== 'number' || itemData.max_quantity_per_purchase <= 0)) {
+      return res.status(400).json({ message: "La quantité maximale par achat doit être un nombre positif ou null." });
+  }
+
   if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
   if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
@@ -442,6 +452,11 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
       return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
   }
+  // Validation pour max_quantity_per_purchase
+  if (itemData.max_quantity_per_purchase !== null && (typeof itemData.max_quantity_per_purchase !== 'number' || itemData.max_quantity_per_purchase <= 0)) {
+      return res.status(400).json({ message: "La quantité maximale par achat doit être un nombre positif ou null." });
+  }
+
   if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
   if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
   if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
