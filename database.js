@@ -51,6 +51,22 @@ const DEFAULT_ECONOMY_SETTINGS = {
     max_positive: 2000,
     min_negative: -200,
     max_negative: -50
+  },
+  // Nouvelle section pour les permissions des commandes
+  permissions: {
+    // Par défaut, toutes les commandes sont accessibles à tout le monde (rôles vides)
+    // Les commandes "abusives" comme add_money/remove_money devraient être gérées avec des permissions Discord
+    // ou des rôles spécifiques ici, mais avec une interface utilisateur plus claire.
+    // Pour l'exemple, je mets des commandes génériques.
+    'collect': [], // Rôles autorisés pour la commande /collect
+    'bonus': [],   // Rôles autorisés pour la commande /bonus
+    'quest': [],
+    'risk': [],
+    // Exemple de commande "abusive" qui devrait être restreinte
+    'add_money': [], // Par défaut, personne (ou seulement les admins)
+    'remove_money': [], // Par défaut, personne (ou seulement les admins)
+    'add_item': [],
+    'remove_item': []
   }
 };
 
@@ -65,6 +81,7 @@ const DEFAULT_SHOP_ITEM = {
   price: 0,
   stock: null, // null signifie illimité par défaut
   unlimited_stock: true, // Nouveau champ pour indiquer si le stock est illimité
+  max_quantity_per_purchase: null, // Nouveau: Quantité maximale par achat (null pour illimité)
   requirements: [], // [{ type: "has_role", value: "role_id" }]
   on_use_requirements: [], // Nouveau: conditions pour utiliser l'item
   on_purchase_actions: [], // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
@@ -84,16 +101,15 @@ async function getGuildSettings(guildId) {
       [guildId]
     );
 
-    let economySettings = DEFAULT_ECONOMY_SETTINGS; // Commencer avec les valeurs par défaut
+    let economySettings = JSON.parse(JSON.stringify(DEFAULT_ECONOMY_SETTINGS)); // Commencer avec les valeurs par défaut (copie profonde)
 
     if (economyRows.length > 0 && economyRows[0].economy_settings) {
       try {
+        const existingSettings = JSON.parse(economyRows[0].economy_settings);
         // Fusionner les paramètres existants avec les défauts pour s'assurer que toutes les clés sont présentes
         // Effectuer une fusion profonde pour les objets imbriqués
-        const existingSettings = JSON.parse(economyRows[0].economy_settings);
-        economySettings = { ...DEFAULT_ECONOMY_SETTINGS }; // Clone les valeurs par défaut
         for (const key in existingSettings) {
-            if (typeof existingSettings[key] === 'object' && !Array.isArray(existingSettings[key]) && economySettings[key]) {
+            if (typeof existingSettings[key] === 'object' && existingSettings[key] !== null && !Array.isArray(existingSettings[key]) && economySettings[key]) {
                 // Si la clé est un objet et existe déjà dans les défauts, fusionner ses propriétés
                 economySettings[key] = { ...economySettings[key], ...existingSettings[key] };
             } else {
