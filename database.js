@@ -65,17 +65,20 @@ const DEFAULT_ECONOMY_SETTINGS = {
     embed_color: "#00FF00",
     min_bet: 1,
     max_bet: 500,
-    rows: 8, // Nombre de lignes de pins
-    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10] // Multiplicateurs pour les slots du bas (maintenant un tableau simple)
+    rows: 8, // Nombre de lignes de pins. Un nombre pair est courant pour Plinko, mais le nombre de multiplicateurs est crucial.
+    // Les multiplicateurs doivent correspondre au nombre de "slots" en bas du plateau, qui est (rows + 1).
+    // Pour 8 lignes, il y a 9 slots. Les multiplicateurs par défaut sont ajustés en conséquence.
+    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10, 5, 3] // 9 multiplicateurs pour 8 lignes
   },
   roulette_game: {
     embed_color: "#0000FF",
     min_bet: 1,
     max_bet: 2000,
     outcomes: [ // Définition des résultats (couleur, multiplicateur, numéros)
-      {"color": "red", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
-      {"color": "black", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
-      {"color": "green", "multiplier": 14, "numbers": [0]}
+      // Les couleurs sont maintenant en format hexadécimal pour la cohérence
+      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]}, // Rouge
+      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]}, // Noir
+      {"color": "#008000", "multiplier": 14, "numbers": [0]} // Vert
     ]
   },
   dice_game: {
