@@ -76,9 +76,9 @@ const DEFAULT_ECONOMY_SETTINGS = {
     max_bet: 2000,
     outcomes: [ // Définition des résultats (couleur, multiplicateur, numéros)
       // Les couleurs sont maintenant en format hexadécimal pour la cohérence
-      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]}, // Rouge
-      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]}, // Noir
-      {"color": "#008000", "multiplier": 14, "numbers": [0]} // Vert
+      {"color": "#FF0000", "name": "Rouge", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]}, // Rouge
+      {"color": "#000000", "name": "Noir", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]}, // Noir
+      {"color": "#008000", "name": "Vert (0)", "multiplier": 14, "numbers": [0]} // Vert
     ]
   },
   dice_game: {
