@@ -1,4 +1,3 @@
-
 // backend/database.js
 const mysql = require('mysql2/promise');
 
@@ -141,7 +140,6 @@ async function getGuildSettings(guildId) {
         }
       } catch (parseError) {
         console.error(`Erreur de parsing JSON pour economy_settings de la guilde ${guildId}:`, parseError);
-        throw parseError;
         // Si le JSON est invalide, on reste sur les DEFAULT_ECONOMY_SETTINGS
       }
     }
