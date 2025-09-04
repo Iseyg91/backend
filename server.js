@@ -43,17 +43,48 @@ const dbConfig = {
   database: DB_NAME
 };
 
-async function getDbConnection() {
-  const connection = await mysql.createConnection(dbConfig);
-  console.log('Connecté à MySQL !');
-  return connection;
+// Centralized database connection pool (recommended for production)
+let pool;
+async function initializeDbPool() {
+  try {
+    pool = mysql.createPool(dbConfig);
+    console.log('MySQL connection pool initialized!');
+    // Test connection
+    const connection = await pool.getConnection();
+    connection.release(); // Release the connection back to the pool
+    console.log('Successfully connected to MySQL database!');
+  } catch (error) {
+    console.error('Failed to initialize MySQL connection pool:', error);
+    // Exit the process if database connection fails at startup
+    process.exit(1); 
+  }
 }
+
+// Modified getDbConnection to use the pool
+async function getDbConnection() {
+  if (!pool) {
+    await initializeDbPool(); // Initialize if not already
+  }
+  return pool.getConnection(); // Get a connection from the pool
+}
+
 
 const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 bot.once('ready', () => {
   console.log(`Bot connecté en tant que ${bot.user.tag}`);
 });
+
+// Add error handling for bot login
+bot.on('error', error => {
+  console.error('Discord bot encountered an error:', error);
+});
+
+bot.login(BOT_TOKEN).catch(err => {
+  console.error('Failed to login to Discord bot:', err);
+  // Consider exiting or retrying if bot login is critical
+});
+
 
 // ----------------------
 // Middleware d'authentification
@@ -62,7 +93,10 @@ async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  if (token == null) return res.sendStatus(401);
+  if (token == null) {
+    console.warn('Authentication: No token provided.');
+    return res.sendStatus(401); // Unauthorized
+  }
 
   req.accessToken = token;
   next();
@@ -76,6 +110,7 @@ async function checkGuildAdminPermissions(req, res, next) {
   const accessToken = req.accessToken;
 
   if (!guildId || !accessToken) {
+    console.warn('Permission Check: Missing guildId or accessToken.');
     return res.status(400).json({ message: "ID de guilde ou jeton d'accès manquant." });
   }
 
@@ -89,6 +124,7 @@ async function checkGuildAdminPermissions(req, res, next) {
     const targetGuild = userGuilds.find(g => g.id === guildId);
 
     if (!targetGuild) {
+      console.warn(`Permission Check: Guild ${guildId} not found for user with provided token.`);
       return res.status(403).json({ message: "Accès refusé : Guilde non trouvée pour cet utilisateur." });
     }
 
@@ -96,18 +132,37 @@ async function checkGuildAdminPermissions(req, res, next) {
     const isOwner = targetGuild.owner;
 
     if (!hasAdminPerms && !isOwner) {
+      console.warn(`Permission Check: User does not have admin permissions or is not owner for guild ${guildId}.`);
       return res.status(403).json({ message: "Accès refusé : Vous n'avez pas les permissions d'administrateur sur cette guilde." });
+    }
+
+    // Ensure bot is ready before checking its presence
+    if (!bot.isReady()) {
+      console.error('Permission Check: Discord bot is not ready.');
+      return res.status(503).json({ message: "Le bot Discord n'est pas prêt. Veuillez réessayer plus tard." });
     }
 
     const botGuild = bot.guilds.cache.get(guildId);
     if (!botGuild) {
+      console.warn(`Permission Check: Bot is not present on guild ${guildId}.`);
       return res.status(404).json({ message: "Le bot n'est pas présent sur ce serveur." });
     }
 
+    // Attach botGuild to request for later use if needed
+    req.botGuild = botGuild; 
     next();
 
   } catch (error) {
     console.error(`Erreur lors de la vérification des permissions pour la guilde ${guildId}:`, error.response?.data || error.message);
+    // More specific error handling for Axios errors
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 401) {
+        return res.status(401).json({ message: "Jeton d'accès Discord invalide ou expiré." });
+      }
+      if (error.response?.status === 429) {
+        return res.status(429).json({ message: "Trop de requêtes vers l'API Discord. Veuillez réessayer." });
+      }
+    }
     res.status(500).json({ message: "Erreur interne du serveur lors de la vérification des permissions." });
   }
 }
@@ -148,6 +203,28 @@ app.get('/api/discord-oauth', async (req, res) => {
     const userGuilds = guildsResponse.data;
 
     const ADMINISTRATOR_PERMISSION = PermissionsBitField.Flags.Administrator;
+
+    // Ensure bot is ready before accessing its cache
+    if (!bot.isReady()) {
+      console.error('OAuth: Discord bot is not ready when processing guilds.');
+      // Fallback: return guilds without bot presence info, or handle gracefully
+      const processedGuilds = userGuilds.map(g => ({
+        id: g.id,
+        name: g.name,
+        icon: g.icon,
+        memberCount: 0, // Cannot get accurate member count without bot
+        isOwner: g.owner,
+        hasAdminPerms: (BigInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION,
+        isInServer: false // Assume false if bot not ready
+      }));
+      return res.json({
+        success: true,
+        user,
+        guilds: processedGuilds,
+        accessToken: access_token,
+        message: "Bot not fully ready, guild presence might be inaccurate."
+      });
+    }
 
     const botGuilds = bot.guilds.cache.map(g => ({
       id: g.id,
@@ -201,7 +278,7 @@ app.get('/api/test-db', async (req, res) => {
     console.error('Erreur test DB :', error);
     res.status(500).json({ success: false, error: 'Erreur de connexion ou requête DB.' });
   } finally {
-    if (connection) connection.end();
+    if (connection) connection.release(); // Use release for pool connections
   }
 });
 
@@ -211,11 +288,8 @@ app.get('/api/test-db', async (req, res) => {
 app.get('/api/guilds/:guildId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
-    const guild = bot.guilds.cache.get(guildId);
-
-    if (!guild) {
-      return res.status(404).json({ success: false, message: "Guilde non trouvée ou bot non présent." });
-    }
+    // req.botGuild is already set by checkGuildAdminPermissions
+    const guild = req.botGuild; 
 
     res.json({
       success: true,
@@ -237,15 +311,15 @@ app.get('/api/guilds/:guildId', authenticateToken, checkGuildAdminPermissions, a
 app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   try {
-    const guild = bot.guilds.cache.get(guildId);
+    // req.botGuild is already set by checkGuildAdminPermissions
+    const guild = req.botGuild;
 
-    if (!guild) {
-      return res.status(404).json({ success: false, message: "Guilde non trouvée ou bot non présent." });
-    }
+    // Fetch roles to ensure cache is up-to-date, especially for large guilds
+    await guild.roles.fetch(); 
 
     const roles = guild.roles.cache
-      .filter(role => !role.managed && role.id !== guild.id)
-      .sort((a, b) => b.position - a.position)
+      .filter(role => !role.managed && role.id !== guild.id) // Filter out managed roles and @everyone
+      .sort((a, b) => b.position - a.position) // Sort by position (highest first)
       .map(role => ({
         id: role.id,
         name: role.name,
@@ -267,20 +341,26 @@ app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissi
 // ----------------------
 app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
+  let connection; // Declare connection here
   try {
+    connection = await getDbConnection(); // Get connection from pool
     const settings = await getGuildSettings(guildId);
     return res.json(settings);
   } catch (error) {
     console.error("Erreur lors de la récupération des paramètres d'économie :", error);
     return res.status(500).json({ message: "Erreur lors de la récupération des paramètres d'économie." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
 app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const newEconomySettingsPayload = req.body;
+  let connection; // Declare connection here
 
   try {
+    connection = await getDbConnection(); // Get connection from pool
     let currentSettings = await getGuildSettings(guildId);
     const mergedSettings = { ...currentSettings };
     for (const key in newEconomySettingsPayload) {
@@ -290,13 +370,16 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
                 mergedSettings[key] = newEconomySettingsPayload[key];
             }
         }
-    mergedSettings.collect_roles = currentSettings.collect_roles;
+    // Ensure collect_roles are not overwritten by the payload, they are managed separately
+    mergedSettings.collect_roles = currentSettings.collect_roles; 
 
     await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
   } catch (error) {
     console.error("Erreur lors de la mise à jour des paramètres d'économie :", error);
     return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'économie." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
@@ -307,6 +390,7 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
 app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const { role_id, amount, cooldown } = req.body;
+  let connection; // Declare connection here
 
   if (!role_id || !amount || !cooldown) {
     return res.status(400).json({ message: "Données de rôle de collect manquantes (role_id, amount, cooldown)." });
@@ -317,6 +401,7 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
   }
 
   try {
+    connection = await getDbConnection(); // Get connection from pool
     await addCollectRole(guildId, { role_id, amount, cooldown });
     return res.status(201).json({ message: "Rôle de collect ajouté avec succès." });
   } catch (error) {
@@ -325,14 +410,18 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
         return res.status(409).json({ message: error.message });
     }
     return res.status(500).json({ message: "Erreur lors de l'ajout du rôle de collect." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
 app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const roleIdToDelete = req.params.roleId;
+  let connection; // Declare connection here
 
   try {
+    connection = await getDbConnection(); // Get connection from pool
     await deleteCollectRole(guildId, roleIdToDelete);
     return res.json({ message: "Rôle de collect supprimé avec succès." });
   } catch (error) {
@@ -341,6 +430,8 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
         return res.status(404).json({ message: error.message });
     }
     return res.status(500).json({ message: "Erreur lors de la suppression du rôle de collect." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
@@ -371,19 +462,25 @@ function standardizeDiscordEmojiUrl(url) {
 // GET tous les items du shop
 app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
+  let connection; // Declare connection here
   try {
+    connection = await getDbConnection(); // Get connection from pool
     const items = await getShopItems(guildId);
     res.json(items);
   } catch (error) {
     console.error(`Erreur lors de la récupération des items du shop pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur lors de la récupération des items du shop." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
 // GET un item spécifique du shop
 app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
+  let connection; // Declare connection here
   try {
+    connection = await getDbConnection(); // Get connection from pool
     const item = await getShopItemById(guildId, itemId);
     if (!item) {
       return res.status(404).json({ message: "Article non trouvé." });
@@ -392,6 +489,8 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   } catch (error) {
     console.error(`Erreur lors de la récupération de l'item ${itemId} pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur lors de la récupération de l'article." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
@@ -399,6 +498,7 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
 app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const itemData = req.body;
+  let connection; // Declare connection here
 
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
     return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
@@ -421,11 +521,14 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
   }
 
   try {
+    connection = await getDbConnection(); // Get connection from pool
     const newItem = await addShopItem(guildId, itemData);
     res.status(201).json({ message: "Article ajouté avec succès.", item: newItem });
   } catch (error) {
     console.error(`Erreur lors de l'ajout de l'item au shop pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur lors de l'ajout de l'article au shop." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
@@ -433,6 +536,7 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
 app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
   const itemData = req.body;
+  let connection; // Declare connection here
 
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
     return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
@@ -455,6 +559,7 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   }
 
   try {
+    connection = await getDbConnection(); // Get connection from pool
     const updatedItem = await updateShopItem(guildId, itemId, itemData);
     res.json({ message: "Article mis à jour avec succès.", item: updatedItem });
   } catch (error) {
@@ -463,13 +568,17 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
       return res.status(404).json({ message: error.message });
     }
     res.status(500).json({ message: "Erreur lors de la mise à jour de l'article." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
 // DELETE un item du shop
 app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const { guildId, itemId } = req.params;
+  let connection; // Declare connection here
   try {
+    connection = await getDbConnection(); // Get connection from pool
     await deleteShopItem(guildId, itemId);
     res.json({ message: "Article supprimé avec succès." });
   } catch (error) {
@@ -478,6 +587,8 @@ app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGu
       return res.status(404).json({ message: error.message });
     }
     res.status(500).json({ message: "Erreur lors de la suppression de l'article." });
+  } finally {
+    if (connection) connection.release(); // Release connection back to pool
   }
 });
 
@@ -489,4 +600,8 @@ app.listen(PORT, () => {
   console.log(`Serveur backend démarré sur le port ${PORT}`);
 });
 
-bot.login(BOT_TOKEN);
+// The bot login is now handled with a catch block above.
+// It's good practice to initialize the DB pool before starting the server listener
+// if your routes heavily depend on it.
+initializeDbPool(); // Call this to set up the pool when the server starts.
+
