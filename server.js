@@ -346,12 +346,21 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
 
 // Fonction utilitaire pour nettoyer et standardiser les URLs d'emojis Discord
 function standardizeDiscordEmojiUrl(url) {
+  // Regex pour capturer l'ID de l'emoji et le type (png, gif, webp)
   const discordEmojiUrlMatch = url.match(/^https:\/\/cdn\.discordapp\.com\/emojis\/(\d+)\.(png|gif|webp)(\?.*)?$/);
   if (discordEmojiUrlMatch) {
     const emojiId = discordEmojiUrlMatch[1];
-    const isAnimated = discordEmojiUrlMatch[2] === 'gif' || (discordEmojiUrlMatch[3] && discordEmojiUrlMatch[3].includes('animated=true'));
+    const originalExtension = discordEmojiUrlMatch[2];
+    const queryParams = discordEmojiUrlMatch[3] || '';
+
+    // Déterminer si l'emoji est animé. Discord utilise .gif pour les emojis animés.
+    // Si l'extension originale est gif, ou si les paramètres de requête indiquent une animation.
+    const isAnimated = originalExtension === 'gif' || queryParams.includes('animated=true');
+    
+    // Retourne l'URL standardisée en .gif si animé, sinon en .png
     return `https://cdn.discordapp.com/emojis/${emojiId}.${isAnimated ? 'gif' : 'png'}`;
   }
+  // Si ce n'est pas une URL d'emoji Discord standard, retourne l'URL telle quelle.
   return url;
 }
 
