@@ -411,7 +411,9 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
     }
     return res.status(500).json({ message: "Erreur lors de l'ajout du rôle de collect." });
   } finally {
-    if (connection) connection.release(); // Release connection back to pool
+    if (connection) {
+      connection.release();
+    }
   }
 });
 
@@ -431,7 +433,9 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
     }
     return res.status(500).json({ message: "Erreur lors de la suppression du rôle de collect." });
   } finally {
-    if (connection) connection.release(); // Release connection back to pool
+    if (connection) {
+      connection.release();
+    }
   }
 });
 
