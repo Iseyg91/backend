@@ -160,8 +160,6 @@ async function checkGuildAdminPermissions(req, res, next) {
         return res.status(401).json({ message: "Jeton d'accès Discord invalide ou expiré." });
       }
       if (error.response?.status === 429) {
-        // This 429 would be from Discord API, not Render.
-        // If Render itself is rate-limiting, it would be before this middleware.
         return res.status(429).json({ message: "Trop de requêtes vers l'API Discord. Veuillez réessayer." });
       }
     }
@@ -350,9 +348,6 @@ app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAd
     return res.json(settings);
   } catch (error) {
     console.error("Erreur lors de la récupération des paramètres d'économie :", error);
-    // If the error is due to Render's rate limiting on the backend itself,
-    // this error might not be directly caught here as a 429 from the client's perspective.
-    // However, if it's an internal server error (e.g., DB issue), it's 500.
     return res.status(500).json({ message: "Erreur lors de la récupération des paramètres d'économie." });
   } finally {
     if (connection) connection.release(); // Release connection back to pool
@@ -609,4 +604,3 @@ app.listen(PORT, () => {
 // It's good practice to initialize the DB pool before starting the server listener
 // if your routes heavily depend on it.
 initializeDbPool(); // Call this to set up the pool when the server starts.
-
