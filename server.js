@@ -470,8 +470,12 @@ app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPer
   let connection; // Declare connection here
   try {
     connection = await getDbConnection(); // Get connection from pool
-    const items = await getShopItems(guildId);
-    res.json(items);
+    console.log(`Fetching shop items for guild: ${guildId}`);
+    const [rows] = await connection.execute(
+      'SELECT id, item_data FROM shop_items WHERE guild_id = ?',
+      [guildId]
+    );
+    return rows.map(row => ({ id: row.id, ...JSON.parse(row.item_data) }));
   } catch (error) {
     console.error(`Erreur lors de la récupération des items du shop pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur lors de la récupération des items du shop." });
@@ -486,126 +490,192 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   let connection; // Declare connection here
   try {
     connection = await getDbConnection(); // Get connection from pool
-    const item = await getShopItemById(guildId, itemId);
-    if (!item) {
-      return res.status(404).json({ message: "Article non trouvé." });
+    console.log(`Fetching shop item ${itemId} for guild: ${guildId}`);
+    const [rows] = await connection.execute(
+      'SELECT id, item_data FROM shop_items WHERE guild_id = ? AND id = ?',
+      [guildId, itemId]
+    );
+    if (rows.length === 0) {
+      return null;
     }
-    res.json(item);
+    return { id: rows[0].id, ...JSON.parse(rows[0].item_data) };
   } catch (error) {
     console.error(`Erreur lors de la récupération de l'item ${itemId} pour la guilde ${guildId}:`, error);
-    res.status(500).json({ message: "Erreur lors de la récupération de l'article." });
+    throw error;
   } finally {
-    if (connection) connection.release(); // Release connection back to pool
+    if (connection) {
+      connection.release();
+    }
   }
 });
 
-// POST (ajouter) un item au shop
-app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const guildId = req.params.guildId;
-  const itemData = req.body;
-  let connection; // Declare connection here
-
+async function validateShopItemPayload(itemData) {
   if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
-    return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
+    return { isValid: false, message: "Nom et prix de l'article sont requis et le prix doit être positif." };
   }
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
-      return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
+    return { isValid: false, message: "Le stock doit être un nombre positif si le stock n'est pas illimité." };
   }
-  // Validation pour max_purchase_per_transaction
   if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction <= 0)) {
-    return res.status(400).json({ message: "La quantité maximale par transaction doit être un nombre positif ou nulle pour illimité." });
+    return { isValid: false, message: "La quantité maximale par transaction doit être un nombre positif ou nulle pour illimité." };
   }
 
-  if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
-  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
-  if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
-  if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
-
-  if (itemData.image_url) {
-    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
-  }
-
-  try {
-    connection = await getDbConnection(); // Get connection from pool
-    const newItem = await addShopItem(guildId, itemData);
-    res.status(201).json({ message: "Article ajouté avec succès.", item: newItem });
-  } catch (error) {
-    console.error(`Erreur lors de l'ajout de l'item au shop pour la guilde ${guildId}:`, error);
-    res.status(500).json({ message: "Erreur lors de l'ajout de l'article au shop." });
-  } finally {
-    if (connection) connection.release(); // Release connection back to pool
-  }
-});
-
-// PUT (modifier) un item du shop
-app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const { guildId, itemId } = req.params;
-  const itemData = req.body;
-  let connection; // Declare connection here
-
-  if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
-    return res.status(400).json({ message: "Nom et prix de l'article sont requis et le prix doit être positif." });
-  }
-  if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
-      return res.status(400).json({ message: "Le stock doit être un nombre positif si le stock n'est pas illimité." });
-  }
-  // Validation pour max_purchase_per_transaction
-  if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction <= 0)) {
-    return res.status(400).json({ message: "La quantité maximale par transaction doit être un nombre positif ou nulle pour illimité." });
-  }
-
-  if (!Array.isArray(itemData.requirements)) itemData.requirements = [];
-  if (!Array.isArray(itemData.on_use_requirements)) itemData.on_use_requirements = [];
-  if (!Array.isArray(itemData.on_purchase_actions)) itemData.on_purchase_actions = [];
-  if (!Array.isArray(itemData.on_use_actions)) itemData.on_use_actions = [];
-
-  if (itemData.image_url) {
-    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
-  }
-
-  try {
-    connection = await getDbConnection(); // Get connection from pool
-    const updatedItem = await updateShopItem(guildId, itemId, itemData);
-    res.json({ message: "Article mis à jour avec succès.", item: updatedItem });
-  } catch (error) {
-    console.error(`Erreur lors de la mise à jour de l'item ${itemId} pour la guilde ${guildId}:`, error);
-    if (error.message.includes("Article non trouvé")) {
-      return res.status(404).json({ message: error.message });
+  // Validate requirements and actions
+  const validateRule = (rule, type) => {
+    if (!rule.type || !rule.value) {
+      return `Type ou valeur manquant pour une règle de ${type}.`;
     }
-    res.status(500).json({ message: "Erreur lors de la mise à jour de l'article." });
-  } finally {
-    if (connection) connection.release(); // Release connection back to pool
-  }
-});
-
-// DELETE un item du shop
-app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const { guildId, itemId } = req.params;
-  let connection; // Declare connection here
-  try {
-    connection = await getDbConnection(); // Get connection from pool
-    await deleteShopItem(guildId, itemId);
-    res.json({ message: "Article supprimé avec succès." });
-  } catch (error) {
-    console.error(`Erreur lors de la suppression de l'item ${itemId} pour la guilde ${guildId}:`, error);
-    if (error.message.includes("Article non trouvé")) {
-      return res.status(404).json({ message: error.message });
+    if (['has_role', 'not_has_role'].includes(rule.type)) {
+      // For roles, value should be a string (role ID)
+      if (typeof rule.value !== 'string' || rule.value.length === 0) {
+        return `ID de rôle invalide pour la règle de ${type} de type ${rule.type}.`;
+      }
+    } else if (['has_item', 'not_has_item'].includes(rule.type)) {
+      // For items, value should be an object { itemId: string, quantity: number }
+      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0) {
+        return `Données d'item invalides pour la règle de ${type} de type ${rule.type}. (itemId et quantity > 0 requis)`;
+      }
+    } else if (['give_money'].includes(rule.type)) {
+      if (typeof rule.value !== 'number' || rule.value < 0) {
+        return `Montant d'argent invalide pour la règle de ${type} de type ${rule.type}.`;
+      }
+    } else if (['give_role', 'remove_role'].includes(rule.type)) {
+      if (typeof rule.value !== 'string' || rule.value.length === 0) {
+        return `ID de rôle invalide pour l'action de ${type} de type ${rule.type}.`;
+      }
+    } else if (['give_item', 'remove_item'].includes(rule.type)) {
+      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0) {
+        return `Données d'item invalides pour l'action de ${type} de type ${rule.type}. (itemId et quantity > 0 requis)`;
+      }
+    } else {
+      return `Type de règle de ${type} inconnu: ${rule.type}.`;
     }
-    res.status(500).json({ message: "Erreur lors de la suppression de l'article." });
-  } finally {
-    if (connection) connection.release(); // Release connection back to pool
+    return null; // No error
+  };
+
+  for (const req of itemData.requirements) {
+    const error = validateRule(req, 'requirement');
+    if (error) return { isValid: false, message: `Erreur dans les exigences d'achat: ${error}` };
   }
-});
+  for (const req of itemData.on_use_requirements) {
+    const error = validateRule(req, 'on_use_requirement');
+    if (error) return { isValid: false, message: `Erreur dans les exigences d'utilisation: ${error}` };
+  }
+  for (const action of itemData.on_purchase_actions) {
+    const error = validateRule(action, 'on_purchase_action');
+    if (error) return { isValid: false, message: `Erreur dans les actions d'achat: ${error}` };
+  }
+  for (const action of itemData.on_use_actions) {
+    const error = validateRule(action, 'on_use_action');
+    if (error) return { isValid: false, message: `Erreur dans les actions d'utilisation: ${error}` };
+  }
+
+  return { isValid: true };
+}
 
 
-// ----------------------
-// Lancement du serveur et du bot
-// ----------------------
-app.listen(PORT, () => {
-  console.log(`Serveur backend démarré sur le port ${PORT}`);
-});
+async function addShopItem(guildId, itemData) {
+  let connection;
+  try {
+    connection = await getDbConnectionFromPool(); // Use the pool connection
+    console.log(`Adding shop item for guild ${guildId}:`, itemData);
 
-// The bot login is now handled with a catch block above.
-// It's good practice to initialize the DB pool before starting the server listener
-// if your routes heavily depend on it.
-initializeDbPool(); // Call this to set up the pool when the server starts.
+    const validation = await validateShopItemPayload(itemData);
+    if (!validation.isValid) {
+      throw new Error(validation.message);
+    }
+
+    // Fusionner avec les valeurs par défaut pour s'assurer que tous les champs sont présents
+    const mergedItemData = { ...DEFAULT_SHOP_ITEM, ...itemData };
+    const itemJson = JSON.stringify(mergedItemData);
+    const [result] = await connection.execute(
+      'INSERT INTO shop_items (guild_id, item_data) VALUES (?, ?)',
+      [guildId, itemJson]
+    );
+    console.log(`Shop item added successfully for guild ${guildId}.`);
+    return { id: result.insertId, ...mergedItemData };
+  } catch (error) {
+    console.error(`Error in addShopItem for guild ${guildId}:`, error);
+    throw error;
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+}
+
+async function updateShopItem(guildId, itemId, itemData) {
+  let connection;
+  try {
+    connection = await getDbConnectionFromPool(); // Use the pool connection
+    console.log(`Updating shop item ${itemId} for guild ${guildId}:`, itemData);
+
+    const validation = await validateShopItemPayload(itemData);
+    if (!validation.isValid) {
+      throw new Error(validation.message);
+    }
+
+    // Récupérer l'item existant pour une fusion profonde si nécessaire
+    const existingItem = await getShopItemById(guildId, itemId); // This will use the pool too
+    if (!existingItem) {
+      throw new Error("Article non trouvé.");
+    }
+    // Fusionner les données existantes avec les nouvelles données
+    const mergedItemData = { ...existingItem, ...itemData };
+    const itemJson = JSON.stringify(mergedItemData);
+
+    const [result] = await connection.execute(
+      'UPDATE shop_items SET item_data = ? WHERE guild_id = ? AND id = ?',
+      [itemJson, guildId, itemId]
+    );
+    if (result.affectedRows === 0) {
+      throw new Error("Article non trouvé ou aucune modification effectuée.");
+    }
+    console.log(`Shop item ${itemId} updated successfully for guild ${guildId}.`);
+    return { id: itemId, ...mergedItemData };
+  } catch (error) {
+    console.error(`Error in updateShopItem for guild ${guildId}:`, error);
+    throw error;
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+}
+
+async function deleteShopItem(guildId, itemId) {
+  let connection;
+  try {
+    connection = await getDbConnectionFromPool(); // Use the pool connection
+    console.log(`Deleting shop item ${itemId} for guild ${guildId}.`);
+    const [result] = await connection.execute(
+      'DELETE FROM shop_items WHERE guild_id = ? AND id = ?',
+      [guildId, itemId]
+    );
+    if (result.affectedRows === 0) {
+      throw new Error("Article non trouvé ou n'a pas pu être supprimé.");
+    }
+    console.log(`Shop item ${itemId} deleted successfully for guild ${guildId}.`);
+  } catch (error) {
+    console.error(`Error in deleteShopItem for guild ${guildId}:`, error);
+    throw error;
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+}
+
+
+module.exports = {
+  initializeDbPool, // Export this to be called once from server.js
+  getGuildSettings,
+  updateEconomySettings,
+  addCollectRole,
+  deleteCollectRole,
+  getShopItems,
+  getShopItemById,
+  addShopItem,
+  updateShopItem,
+  deleteShopItem
+};
