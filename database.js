@@ -1,20 +1,6 @@
 // backend/database.js
 const mysql = require('mysql2/promise');
 
-// dbConfig should be passed or accessed from environment variables
-// Assuming dbConfig is available from server.js or .env
-// For this file, we'll assume it's passed or globally accessible if using a pool
-// If you want this file to manage its own connection, it should also create a pool.
-// For simplicity and best practice, the pool is managed in server.js and connections are passed.
-
-// If getDbConnection is passed from server.js, this file doesn't need dbConfig directly.
-// However, if it's meant to be standalone, it needs dbConfig.
-// Let's assume getDbConnection is provided by the caller (server.js)
-// and this file just uses it.
-
-// To make this file truly independent and reusable, it should manage its own pool.
-// Let's modify it to create its own pool, but ensure it's only created once.
-
 let dbPool; // Declare a pool variable
 
 function initializeDbPool(dbConfig) {
@@ -25,11 +11,8 @@ function initializeDbPool(dbConfig) {
   return dbPool;
 }
 
-// Modified getDbConnection to use the local pool
 async function getDbConnectionFromPool() {
   if (!dbPool) {
-    // This should ideally not happen if initializeDbPool is called at startup
-    // but as a fallback, try to get config from process.env
     const dbConfig = {
       host: process.env.DB_HOST,
       user: process.env.DB_USER,
@@ -41,14 +24,13 @@ async function getDbConnectionFromPool() {
   return dbPool.getConnection();
 }
 
-
 // Valeurs par défaut pour les paramètres d'économie
 const DEFAULT_ECONOMY_SETTINGS = {
   general_embeds: {
     balance_embed_color: "#00ffcc",
-    balance_embed_theme: "default",
+    // balance_embed_theme: "default", // Supprimé
     collect_embed_color: "#00ffcc",
-    collect_embed_theme: "default"
+    // collect_embed_theme: "default" // Supprimé
   },
   currency: {
     name: "Crédits", // Nom par défaut
@@ -64,7 +46,7 @@ const DEFAULT_ECONOMY_SETTINGS = {
   quest_command: {
     embed_color: "#00ffcc",
     success_message: "Vous avez réussi la quête et gagné {amount} {currency_symbol} !",
-    unsuccess_message: "Vous avez échoué la quête et perdu {amount} {currency_symbol} !", // Ajout du message d'échec
+    unsuccess_message: "Vous avez échoué la quête et perdu {amount} {currency_symbol} !",
     cooldown: 7200, // 2 heures
     min_negative: -50,
     max_negative: -10,
@@ -81,45 +63,40 @@ const DEFAULT_ECONOMY_SETTINGS = {
     min_negative: -200,
     max_negative: -50
   },
-  // Nouvelle section pour les jeux
   crash_game: {
     embed_color: "#FF0000",
     min_bet: 1,
     max_bet: 1000,
     min_multiplier: 1.01,
     max_multiplier: 100,
-    crash_chance: 50 // Probabilité que le jeu crash tôt (en %)
+    crash_chance: 50
   },
   plinko_game: {
     embed_color: "#00FF00",
     min_bet: 1,
     max_bet: 500,
-    rows: 8, // Nombre de lignes de pins. Un nombre pair est courant pour Plinko, mais le nombre de multiplicateurs est crucial.
-    // Les multiplicateurs doivent correspondre au nombre de "slots" en bas du plateau, qui est (rows + 1).
-    // Pour 8 lignes, il y a 9 slots. Les multiplicateurs par défaut sont ajustés en conséquence.
-    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10, 5, 3] // 9 multiplicateurs pour 8 lignes
+    rows: 8,
+    multipliers: [0.5, 1, 1.5, 2, 3, 5, 10, 5, 3]
   },
   roulette_game: {
     embed_color: "#0000FF",
     min_bet: 1,
     max_bet: 2000,
-    outcomes: [ // Définition des résultats (couleur, multiplicateur, numéros)
-      // Les couleurs sont maintenant en format hexadécimal pour la cohérence
-      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]}, // Rouge
-      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]}, // Noir
-      {"color": "#008000", "multiplier": 14, "numbers": [0]} // Vert
+    outcomes: [
+      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
+      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
+      {"color": "#008000", "multiplier": 14, "numbers": [0]}
     ]
   },
   dice_game: {
     embed_color: "#FFFF00",
     min_bet: 1,
     max_bet: 100,
-    min_roll: 1, // Minimum que l'utilisateur peut prédire
-    max_roll: 99 // Maximum que l'utilisateur peut prédire
+    min_roll: 1,
+    max_roll: 99
   }
 };
 
-// Valeurs par défaut pour un item de shop
 const DEFAULT_SHOP_ITEM = {
   name: "Nouvel Article",
   description: "",
@@ -128,30 +105,27 @@ const DEFAULT_SHOP_ITEM = {
   usable: true,
   inventory: true,
   price: 0,
-  stock: null, // null signifie illimité par défaut
-  unlimited_stock: true, // Nouveau champ pour indiquer si le stock est illimité
-  max_purchase_per_transaction: null, // Nouveau: null signifie illimité
-  requirements: [], // [{ type: "has_role", value: "role_id" }]
-  on_use_requirements: [], // Nouveau: conditions pour utiliser l'item
-  on_purchase_actions: [], // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
-  on_use_actions: [] // [{ type: "give_role", value: "role_id" }, { type: "give_money", value: "amount" }]
+  stock: null,
+  unlimited_stock: true,
+  max_purchase_per_transaction: null,
+  requirements: [],
+  on_use_requirements: [],
+  on_purchase_actions: [],
+  on_use_actions: []
 };
 
-
-// Fonction pour récupérer TOUS les paramètres d'une guilde (y compris les rôles de collect)
 async function getGuildSettings(guildId) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Fetching settings for guild: ${guildId}`);
 
-    // 1. Récupérer les paramètres d'économie JSON de la table guild_settings
     const [economyRows] = await connection.execute(
       'SELECT economy_settings FROM guild_settings WHERE guild_id = ?',
       [guildId]
     );
 
-    let economySettings = JSON.parse(JSON.stringify(DEFAULT_ECONOMY_SETTINGS)); // Deep clone defaults
+    let economySettings = JSON.parse(JSON.stringify(DEFAULT_ECONOMY_SETTINGS));
 
     if (economyRows.length > 0 && economyRows[0].economy_settings) {
       try {
@@ -160,44 +134,51 @@ async function getGuildSettings(guildId) {
         for (const key in DEFAULT_ECONOMY_SETTINGS) {
           if (existingSettings.hasOwnProperty(key)) {
             if (typeof DEFAULT_ECONOMY_SETTINGS[key] === 'object' && DEFAULT_ECONOMY_SETTINGS[key] !== null && !Array.isArray(DEFAULT_ECONOMY_SETTINGS[key])) {
-              // Deep merge for nested objects
+              // Deep merge for nested objects, but exclude the theme properties
               economySettings[key] = { ...DEFAULT_ECONOMY_SETTINGS[key], ...existingSettings[key] };
+              // Explicitly remove theme properties if they exist in existingSettings
+              if (key === 'general_embeds') {
+                delete economySettings[key].balance_embed_theme;
+                delete economySettings[key].collect_embed_theme;
+              }
             } else {
-              // Direct assignment for primitives, arrays, or if default is not an object
               economySettings[key] = existingSettings[key];
             }
           }
         }
       } catch (parseError) {
         console.error(`Erreur de parsing JSON pour economy_settings de la guilde ${guildId}:`, parseError);
-        // If JSON is invalid, stick with DEFAULT_ECONOMY_SETTINGS (already cloned)
       }
     }
 
-    // 2. Récupérer les rôles de collect de la table collect_roles
     const [collectRolesRows] = await connection.execute(
       'SELECT role_id, amount, cooldown FROM collect_roles WHERE guild_id = ?',
       [guildId]
     );
 
-    economySettings.collect_roles = collectRolesRows; // Ajouter les rôles de collect à l'objet settings
+    economySettings.collect_roles = collectRolesRows;
     console.log(`Settings fetched for guild ${guildId}:`, economySettings);
     return economySettings;
 
   } catch (error) {
     console.error(`Error in getGuildSettings for guild ${guildId}:`, error);
-    throw error; // Re-throw the error for the caller to handle
+    throw error;
   } finally {
-    if (connection) connection.release(); // Release connection back to pool
+    if (connection) connection.release();
   }
 }
 
-// Fonction pour mettre à jour les paramètres d'économie JSON
 async function updateEconomySettings(guildId, newEconomySettings) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
-    const settingsJson = JSON.stringify(newEconomySettings);
+    connection = await getDbConnectionFromPool();
+    // Before stringifying, ensure theme properties are not included in the update
+    const settingsToSave = { ...newEconomySettings };
+    if (settingsToSave.general_embeds) {
+      delete settingsToSave.general_embeds.balance_embed_theme;
+      delete settingsToSave.general_embeds.collect_embed_theme;
+    }
+    const settingsJson = JSON.stringify(settingsToSave);
     console.log(`Updating settings for guild ${guildId} with:`, settingsJson);
 
     await connection.execute(
@@ -211,15 +192,14 @@ async function updateEconomySettings(guildId, newEconomySettings) {
     console.error(`Error in updateEconomySettings for guild ${guildId}:`, error);
     throw error;
   } finally {
-    if (connection) connection.release(); // Release connection back to pool
+    if (connection) connection.release();
   }
 }
 
-// Fonction pour ajouter un rôle de collect
 async function addCollectRole(guildId, roleData) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     const { role_id, amount, cooldown } = roleData;
     console.log(`Adding collect role for guild ${guildId}:`, roleData);
 
@@ -247,11 +227,10 @@ async function addCollectRole(guildId, roleData) {
   }
 }
 
-// Fonction pour supprimer un rôle de collect
 async function deleteCollectRole(guildId, roleIdToDelete) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Deleting collect role ${roleIdToDelete} for guild ${guildId}.`);
     const [result] = await connection.execute(
       'DELETE FROM collect_roles WHERE guild_id = ? AND role_id = ?',
@@ -272,12 +251,10 @@ async function deleteCollectRole(guildId, roleIdToDelete) {
   }
 }
 
-// --- Fonctions pour la gestion du Shop ---
-
 async function getShopItems(guildId) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Fetching shop items for guild: ${guildId}`);
     const [rows] = await connection.execute(
       'SELECT id, item_data FROM shop_items WHERE guild_id = ?',
@@ -297,7 +274,7 @@ async function getShopItems(guildId) {
 async function getShopItemById(guildId, itemId) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Fetching shop item ${itemId} for guild: ${guildId}`);
     const [rows] = await connection.execute(
       'SELECT id, item_data FROM shop_items WHERE guild_id = ? AND id = ?',
@@ -320,9 +297,8 @@ async function getShopItemById(guildId, itemId) {
 async function addShopItem(guildId, itemData) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Adding shop item for guild ${guildId}:`, itemData);
-    // Fusionner avec les valeurs par défaut pour s'assurer que tous les champs sont présents
     const mergedItemData = { ...DEFAULT_SHOP_ITEM, ...itemData };
     const itemJson = JSON.stringify(mergedItemData);
     const [result] = await connection.execute(
@@ -344,14 +320,12 @@ async function addShopItem(guildId, itemData) {
 async function updateShopItem(guildId, itemId, itemData) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Updating shop item ${itemId} for guild ${guildId}:`, itemData);
-    // Récupérer l'item existant pour une fusion profonde si nécessaire
-    const existingItem = await getShopItemById(guildId, itemId); // This will use the pool too
+    const existingItem = await getShopItemById(guildId, itemId);
     if (!existingItem) {
       throw new Error("Article non trouvé.");
     }
-    // Fusionner les données existantes avec les nouvelles données
     const mergedItemData = { ...existingItem, ...itemData };
     const itemJson = JSON.stringify(mergedItemData);
 
@@ -377,7 +351,7 @@ async function updateShopItem(guildId, itemId, itemData) {
 async function deleteShopItem(guildId, itemId) {
   let connection;
   try {
-    connection = await getDbConnectionFromPool(); // Use the pool connection
+    connection = await getDbConnectionFromPool();
     console.log(`Deleting shop item ${itemId} for guild ${guildId}.`);
     const [result] = await connection.execute(
       'DELETE FROM shop_items WHERE guild_id = ? AND id = ?',
@@ -397,9 +371,8 @@ async function deleteShopItem(guildId, itemId) {
   }
 }
 
-
 module.exports = {
-  initializeDbPool, // Export this to be called once from server.js
+  initializeDbPool,
   getGuildSettings,
   updateEconomySettings,
   addCollectRole,
