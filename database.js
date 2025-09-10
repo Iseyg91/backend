@@ -220,8 +220,7 @@ async function addCollectRole(guildId, roleData) {
   } catch (error) {
     console.error(`Error in addCollectRole for guild ${guildId}:`, error);
     throw error;
-  } finally {
-    if (connection) {
+  } finally { {
       connection.release();
     }
   }
