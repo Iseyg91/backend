@@ -417,11 +417,8 @@ app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPer
   try {
     connection = await getDbConnection();
     console.log(`Fetching shop items for guild: ${guildId}`);
-    const [rows] = await connection.execute(
-      'SELECT id, item_data FROM shop_items WHERE guild_id = ?',
-      [guildId]
-    );
-    return res.json(rows.map(row => ({ id: row.id, ...JSON.parse(row.item_data) }))); // Changed to res.json
+    const items = await getShopItems(guildId); // Use the updated getShopItems
+    return res.json(items);
   } catch (error) {
     console.error(`Erreur lors de la récupération des items du shop pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur lors de la récupération des items du shop." });
@@ -436,17 +433,14 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   try {
     connection = await getDbConnection();
     console.log(`Fetching shop item ${itemId} for guild: ${guildId}`);
-    const [rows] = await connection.execute(
-      'SELECT id, item_data FROM shop_items WHERE guild_id = ? AND id = ?',
-      [guildId, itemId]
-    );
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "Article non trouvé." }); // Changed to res.status(404).json
+    const item = await getShopItemById(guildId, itemId); // Use the updated getShopItemById
+    if (!item) {
+      return res.status(404).json({ message: "Article non trouvé." });
     }
-    return res.json({ id: rows[0].id, ...JSON.parse(rows[0].item_data) }); // Changed to res.json
+    return res.json(item);
   } catch (error) {
     console.error(`Erreur lors de la récupération de l'item ${itemId} pour la guilde ${guildId}:`, error);
-    res.status(500).json({ message: "Erreur interne du serveur." }); // Changed to res.status(500).json
+    res.status(500).json({ message: "Erreur interne du serveur." });
   } finally {
     if (connection) {
       connection.release();
@@ -466,7 +460,7 @@ async function validateShopItemPayload(itemData) {
   }
 
   const validateRule = (rule, type) => {
-    if (!rule.type || typeof rule.value === 'undefined') { // Changed to check for undefined
+    if (!rule.type || typeof rule.value === 'undefined') {
       return `Type ou valeur manquant pour une règle de ${type}.`;
     }
     if (['has_role', 'not_has_role'].includes(rule.type)) {
@@ -474,8 +468,9 @@ async function validateShopItemPayload(itemData) {
         return `ID de rôle invalide pour la règle de ${type} de type ${rule.type}.`;
       }
     } else if (['has_item', 'not_has_item'].includes(rule.type)) {
-      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0) {
-        return `Données d'item invalides pour la règle de ${type} de type ${rule.type}. (itemId et quantity > 0 requis)`;
+      // Ensure itemId is a number for validation
+      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
+        return `Données d'item invalides pour la règle de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
       }
     } else if (['give_money'].includes(rule.type)) {
       if (typeof rule.value !== 'number' || rule.value < 0) {
@@ -486,8 +481,9 @@ async function validateShopItemPayload(itemData) {
         return `ID de rôle invalide pour l'action de ${type} de type ${rule.type}.`;
       }
     } else if (['give_item', 'remove_item'].includes(rule.type)) {
-      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0) {
-        return `Données d'item invalides pour l'action de ${type} de type ${rule.type}. (itemId et quantity > 0 requis)`;
+      // Ensure itemId is a number for validation
+      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
+        return `Données d'item invalides pour l'action de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
       }
     } else {
       return `Type de règle de ${type} inconnu: ${rule.type}.`;
@@ -499,9 +495,11 @@ async function validateShopItemPayload(itemData) {
     const error = validateRule(req, 'requirement');
     if (error) return { isValid: false, message: `Erreur dans les exigences d'achat: ${error}` };
   }
-  for (const req of itemData.on_use_requirements) {
-    const error = validateRule(req, 'on_use_requirement');
-    if (error) return { isValid: false, message: `Erreur dans les exigences d'utilisation: ${error}` };
+  if (itemData.on_use_requirements) { // Check if property exists
+    for (const req of itemData.on_use_requirements) {
+      const error = validateRule(req, 'on_use_requirement');
+      if (error) return { isValid: false, message: `Erreur dans les exigences d'utilisation: ${error}` };
+    }
   }
   for (const action of itemData.on_purchase_actions) {
     const error = validateRule(action, 'on_purchase_action');
@@ -525,7 +523,7 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
-    const newItem = await addShopItem(guildId, itemData);
+    const newItem = await addShopItem(guildId, itemData); // Use the updated addShopItem
     return res.status(201).json(newItem);
   } catch (error) {
     console.error(`Error in addShopItem route for guild ${guildId}:`, error);
@@ -547,7 +545,7 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
-    const updatedItem = await updateShopItem(guildId, itemId, itemData);
+    const updatedItem = await updateShopItem(guildId, itemId, itemData); // Use the updated updateShopItem
     return res.json(updatedItem);
   } catch (error) {
     console.error(`Error in updateShopItem route for guild ${guildId}, item ${itemId}:`, error);
