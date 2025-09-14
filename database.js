@@ -259,7 +259,11 @@ async function getShopItems(guildId) {
       'SELECT id, item_data FROM shop_items WHERE guild_id = ?',
       [guildId]
     );
-    return rows.map(row => ({ id: row.id, ...JSON.parse(row.item_data) }));
+    // Ensure 'id' from the database row is included in the parsed item_data
+    return rows.map(row => {
+      const parsedData = JSON.parse(row.item_data);
+      return { id: row.id, ...parsedData };
+    });
   } catch (error) {
     console.error(`Error in getShopItems for guild ${guildId}:`, error);
     throw error;
@@ -282,7 +286,9 @@ async function getShopItemById(guildId, itemId) {
     if (rows.length === 0) {
       return null;
     }
-    return { id: rows[0].id, ...JSON.parse(rows[0].item_data) };
+    // Ensure 'id' from the database row is included in the parsed item_data
+    const parsedData = JSON.parse(rows[0].item_data);
+    return { id: rows[0].id, ...parsedData };
   } catch (error) {
     console.error(`Error in getShopItemById for guild ${guildId}:`, error);
     throw error;
@@ -299,13 +305,23 @@ async function addShopItem(guildId, itemData) {
     connection = await getDbConnectionFromPool();
     console.log(`Adding shop item for guild ${guildId}:`, itemData);
     const mergedItemData = { ...DEFAULT_SHOP_ITEM, ...itemData };
+    // The 'id' will be set after insertion, so we don't include it in the initial JSON
     const itemJson = JSON.stringify(mergedItemData);
     const [result] = await connection.execute(
       'INSERT INTO shop_items (guild_id, item_data) VALUES (?, ?)',
       [guildId, itemJson]
     );
-    console.log(`Shop item added successfully for guild ${guildId}.`);
-    return { id: result.insertId, ...mergedItemData };
+    // After insertion, retrieve the insertId and update the item_data with it
+    const newItemId = result.insertId;
+    mergedItemData.id = newItemId; // Add the actual DB ID to the item_data
+    const updatedItemJson = JSON.stringify(mergedItemData);
+    await connection.execute(
+      'UPDATE shop_items SET item_data = ? WHERE id = ?',
+      [updatedItemJson, newItemId]
+    );
+
+    console.log(`Shop item added successfully for guild ${guildId} with ID ${newItemId}.`);
+    return { id: newItemId, ...mergedItemData };
   } catch (error) {
     console.error(`Error in addShopItem for guild ${guildId}:`, error);
     throw error;
@@ -326,6 +342,7 @@ async function updateShopItem(guildId, itemId, itemData) {
       throw new Error("Article non trouvé.");
     }
     const mergedItemData = { ...existingItem, ...itemData };
+    mergedItemData.id = itemId; // Ensure the ID in the JSON matches the DB ID
     const itemJson = JSON.stringify(mergedItemData);
 
     const [result] = await connection.execute(
