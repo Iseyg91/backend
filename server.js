@@ -339,7 +339,11 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
       delete mergedSettings.general_embeds.collect_embed_theme;
     }
 
-    mergedSettings.collect_roles = currentSettings.collect_roles; 
+    // Ensure collect_roles are preserved from currentSettings if not provided in payload
+    if (!newEconomySettingsPayload.collect_roles) {
+      mergedSettings.collect_roles = currentSettings.collect_roles; 
+    }
+
 
     await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
@@ -400,15 +404,20 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
 });
 
 function standardizeDiscordEmojiUrl(url) {
+  if (!url) return '';
+  const customEmojiMatch = url.match(/<?(a)?:?(\w+):(\d+)>?/);
   const discordEmojiUrlMatch = url.match(/^https:\/\/cdn\.discordapp\.com\/emojis\/(\d+)\.(png|gif|webp)(\?.*)?$/);
-  if (discordEmojiUrlMatch) {
+
+  if (customEmojiMatch) {
+    const animated = customEmojiMatch[1] === 'a';
+    const emojiId = customEmojiMatch[3];
+    return `https://cdn.discordapp.com/emojis/${emojiId}.${animated ? 'gif' : 'png'}`;
+  } else if (discordEmojiUrlMatch) {
     const emojiId = discordEmojiUrlMatch[1];
-    const originalExtension = discordEmojiUrlMatch[2];
-    const queryParams = discordEmojiUrlMatch[3] || '';
-    const isAnimated = originalExtension === 'gif' || queryParams.includes('animated=true');
+    const isAnimated = discordEmojiUrlMatch[2] === 'gif' || (discordEmojiUrlMatch[3] && discordEmojiUrlMatch[3].includes('animated=true'));
     return `https://cdn.discordapp.com/emojis/${emojiId}.${isAnimated ? 'gif' : 'png'}`;
   }
-  return url;
+  return url; // Return as is if not a recognized Discord emoji format
 }
 
 app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
@@ -463,30 +472,20 @@ async function validateShopItemPayload(itemData) {
     if (!rule.type || typeof rule.value === 'undefined') {
       return `Type ou valeur manquant pour une règle de ${type}.`;
     }
-    if (['has_role', 'not_has_role'].includes(rule.type)) {
+    if (['has_role', 'not_has_role', 'give_role', 'remove_role'].includes(rule.type)) {
       if (typeof rule.value !== 'string' || rule.value.length === 0) {
-        return `ID de rôle invalide pour la règle de ${type} de type ${rule.type}.`;
+        return `ID de rôle invalide pour la règle/action de ${type} de type ${rule.type}.`;
       }
-    } else if (['has_item', 'not_has_item'].includes(rule.type)) {
-      // Ensure itemId is a number for validation
+    } else if (['has_item', 'not_has_item', 'give_item', 'remove_item'].includes(rule.type)) {
       if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
-        return `Données d'item invalides pour la règle de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
+        return `Données d'item invalides pour la règle/action de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
       }
-    } else if (['give_money'].includes(rule.type)) {
+    } else if (rule.type === 'give_money') {
       if (typeof rule.value !== 'number' || rule.value < 0) {
-        return `Montant d'argent invalide pour la règle de ${type} de type ${rule.type}.`;
-      }
-    } else if (['give_role', 'remove_role'].includes(rule.type)) {
-      if (typeof rule.value !== 'string' || rule.value.length === 0) {
-        return `ID de rôle invalide pour l'action de ${type} de type ${rule.type}.`;
-      }
-    } else if (['give_item', 'remove_item'].includes(rule.type)) {
-      // Ensure itemId is a number for validation
-      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
-        return `Données d'item invalides pour l'action de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
+        return `Montant d'argent invalide pour l'action de ${type} de type ${rule.type}.`;
       }
     } else {
-      return `Type de règle de ${type} inconnu: ${rule.type}.`;
+      return `Type de règle/action de ${type} inconnu: ${rule.type}.`;
     }
     return null;
   };
@@ -523,6 +522,9 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
+    // Standardize image_url before saving
+    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
+
     const newItem = await addShopItem(guildId, itemData); // Use the updated addShopItem
     return res.status(201).json(newItem);
   } catch (error) {
@@ -545,6 +547,9 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
+    // Standardize image_url before saving
+    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
+
     const updatedItem = await updateShopItem(guildId, itemId, itemData); // Use the updated updateShopItem
     return res.json(updatedItem);
   } catch (error) {
