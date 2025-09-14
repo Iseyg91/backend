@@ -28,7 +28,9 @@ async function getDbConnectionFromPool() {
 const DEFAULT_ECONOMY_SETTINGS = {
   general_embeds: {
     balance_embed_color: "#00ffcc",
+    // balance_embed_theme: "default", // Supprimé
     collect_embed_color: "#00ffcc",
+    // collect_embed_theme: "default" // Supprimé
   },
   currency: {
     name: "Crédits", // Nom par défaut
@@ -66,7 +68,7 @@ const DEFAULT_ECONOMY_SETTINGS = {
     min_bet: 1,
     max_bet: 1000,
     min_multiplier: 1.01,
-    max_multiplier: 100,
+    max_multiplier: 100.0, // Assurer que c'est un flottant par défaut
     crash_chance: 50
   },
   plinko_game: {
@@ -81,9 +83,9 @@ const DEFAULT_ECONOMY_SETTINGS = {
     min_bet: 1,
     max_bet: 2000,
     outcomes: [
-      {"name": "Rouge", "color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
-      {"name": "Noir", "color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
-      {"name": "Vert (0)", "color": "#008000", "multiplier": 14, "numbers": [0]}
+      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
+      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
+      {"color": "#008000", "multiplier": 14, "numbers": [0]}
     ]
   },
   dice_game: {
@@ -112,6 +114,21 @@ const DEFAULT_SHOP_ITEM = {
   on_use_actions: []
 };
 
+// Fonction utilitaire pour fusionner profondément des objets
+function deepMerge(target, source) {
+  const output = { ...target };
+  if (target && typeof target === 'object' && source && typeof source === 'object') {
+    Object.keys(source).forEach(key => {
+      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+        output[key] = deepMerge(target[key], source[key]);
+      } else {
+        output[key] = source[key];
+      }
+    });
+  }
+  return output;
+}
+
 async function getGuildSettings(guildId) {
   let connection;
   try {
@@ -123,31 +140,26 @@ async function getGuildSettings(guildId) {
       [guildId]
     );
 
-    let economySettings = JSON.parse(JSON.stringify(DEFAULT_ECONOMY_SETTINGS)); // Start with a deep copy of defaults
+    let economySettings = deepMerge({}, DEFAULT_ECONOMY_SETTINGS); // Utiliser deepMerge pour la base
 
     if (economyRows.length > 0 && economyRows[0].economy_settings) {
       try {
         const existingSettings = JSON.parse(economyRows[0].economy_settings);
-        // Perform a deep merge to ensure all default keys are present and existing values override
-        for (const key in economySettings) { // Iterate over DEFAULT_ECONOMY_SETTINGS keys
-          if (existingSettings.hasOwnProperty(key)) {
-            if (typeof economySettings[key] === 'object' && economySettings[key] !== null && !Array.isArray(economySettings[key])) {
-              // Deep merge for nested objects
-              economySettings[key] = { ...economySettings[key], ...existingSettings[key] };
-              // Explicitly remove theme properties if they exist in existingSettings (legacy)
-              if (key === 'general_embeds') {
-                delete economySettings[key].balance_embed_theme;
-                delete economySettings[key].collect_embed_theme;
-              }
-            } else {
-              economySettings[key] = existingSettings[key]; // Override with existing value
-            }
-          }
-          // If existingSettings does not have the key, default value is already in economySettings
+        economySettings = deepMerge(economySettings, existingSettings); // Fusionner les paramètres existants
+        
+        // Supprimer explicitement les propriétés de thème si elles existent dans les paramètres fusionnés
+        if (economySettings.general_embeds) {
+          delete economySettings.general_embeds.balance_embed_theme;
+          delete economySettings.general_embeds.collect_embed_theme;
         }
+
+        // Assurer que max_multiplier est un nombre flottant
+        if (economySettings.crash_game && typeof economySettings.crash_game.max_multiplier === 'string') {
+          economySettings.crash_game.max_multiplier = parseFloat(economySettings.crash_game.max_multiplier);
+        }
+
       } catch (parseError) {
         console.error(`Erreur de parsing JSON pour economy_settings de la guilde ${guildId}:`, parseError);
-        // If parsing fails, we proceed with default settings
       }
     }
 
@@ -172,14 +184,20 @@ async function updateEconomySettings(guildId, newEconomySettings) {
   let connection;
   try {
     connection = await getDbConnectionFromPool();
-    // Before stringifying, ensure theme properties are not included in the update
-    const settingsToSave = { ...newEconomySettings };
+    // Avant de stringifier, s'assurer que les propriétés de thème ne sont pas incluses
+    const settingsToSave = deepMerge({}, newEconomySettings); // Créer une copie profonde pour éviter les mutations inattendues
     if (settingsToSave.general_embeds) {
       delete settingsToSave.general_embeds.balance_embed_theme;
       delete settingsToSave.general_embeds.collect_embed_theme;
     }
-    // Remove collect_roles from the JSON to be saved in economy_settings, as they are in a separate table
-    delete settingsToSave.collect_roles;
+
+    // Assurer que max_multiplier est un nombre flottant avant de sauvegarder
+    if (settingsToSave.crash_game && typeof settingsToSave.crash_game.max_multiplier === 'string') {
+      settingsToSave.crash_game.max_multiplier = parseFloat(settingsToSave.crash_game.max_multiplier);
+    } else if (settingsToSave.crash_game && typeof settingsToSave.crash_game.max_multiplier !== 'number') {
+        // Fallback si ce n'est ni une chaîne ni un nombre (ex: null, undefined)
+        settingsToSave.crash_game.max_multiplier = DEFAULT_ECONOMY_SETTINGS.crash_game.max_multiplier;
+    }
 
     const settingsJson = JSON.stringify(settingsToSave);
     console.log(`Updating settings for guild ${guildId} with:`, settingsJson);
@@ -223,8 +241,7 @@ async function addCollectRole(guildId, roleData) {
   } catch (error) {
     console.error(`Error in addCollectRole for guild ${guildId}:`, error);
     throw error;
-  } finally {
-    if (connection) { // Added check for connection
+  } finally { {
       connection.release();
     }
   }
@@ -346,7 +363,7 @@ async function updateShopItem(guildId, itemId, itemData) {
       throw new Error("Article non trouvé.");
     }
     const mergedItemData = { ...existingItem, ...itemData };
-    mergedItemData.id = parseInt(itemId); // Ensure the ID in the JSON matches the DB ID and is an integer
+    mergedItemData.id = itemId; // Ensure the ID in the JSON matches the DB ID
     const itemJson = JSON.stringify(mergedItemData);
 
     const [result] = await connection.execute(
@@ -357,7 +374,7 @@ async function updateShopItem(guildId, itemId, itemData) {
       throw new Error("Article non trouvé ou aucune modification effectuée.");
     }
     console.log(`Shop item ${itemId} updated successfully for guild ${guildId}.`);
-    return { id: parseInt(itemId), ...mergedItemData };
+    return { id: itemId, ...mergedItemData };
   } catch (error) {
     console.error(`Error in updateShopItem for guild ${guildId}:`, error);
     throw error;
