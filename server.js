@@ -322,15 +322,32 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
   try {
     connection = await getDbConnection();
     let currentSettings = await getGuildSettings(guildId);
-    const mergedSettings = { ...currentSettings };
-
-    for (const key in newEconomySettingsPayload) {
-      if (typeof newEconomySettingsPayload[key] === 'object' && !Array.isArray(newEconomySettingsPayload[key]) && mergedSettings[key]) {
-        // Deep merge for nested objects
-        mergedSettings[key] = { ...mergedSettings[key], ...newEconomySettingsPayload[key] };
-      } else {
-        mergedSettings[key] = newEconomySettingsPayload[key];
+    
+    // Utiliser une fusion profonde pour s'assurer que toutes les propriétés sont correctement mises à jour
+    // et que les objets imbriqués sont fusionnés et non écrasés.
+    const deepMerge = (target, source) => {
+      const output = { ...target };
+      if (target && typeof target === 'object' && source && typeof source === 'object') {
+        Object.keys(source).forEach(key => {
+          if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+            output[key] = deepMerge(target[key], source[key]);
+          } else {
+            output[key] = source[key];
+          }
+        });
       }
+      return output;
+    };
+
+    let mergedSettings = deepMerge(currentSettings, newEconomySettingsPayload);
+
+    // Assurer que max_multiplier est un nombre flottant
+    if (mergedSettings.crash_game && typeof mergedSettings.crash_game.max_multiplier === 'string') {
+      mergedSettings.crash_game.max_multiplier = parseFloat(mergedSettings.crash_game.max_multiplier);
+    } else if (mergedSettings.crash_game && typeof mergedSettings.crash_game.max_multiplier !== 'number') {
+        // Fallback si ce n'est ni une chaîne ni un nombre (ex: null, undefined)
+        // Utiliser la valeur par défaut du backend pour éviter les problèmes
+        mergedSettings.crash_game.max_multiplier = 100.0; // Valeur par défaut du DEFAULT_ECONOMY_SETTINGS
     }
 
     // Explicitly remove theme properties from the merged settings before saving
@@ -339,11 +356,8 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
       delete mergedSettings.general_embeds.collect_embed_theme;
     }
 
-    // Ensure collect_roles are preserved from currentSettings if not provided in payload
-    if (!newEconomySettingsPayload.collect_roles) {
-      mergedSettings.collect_roles = currentSettings.collect_roles; 
-    }
-
+    // Conserver les collect_roles car ils sont gérés séparément
+    mergedSettings.collect_roles = currentSettings.collect_roles; 
 
     await updateEconomySettings(guildId, mergedSettings);
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
@@ -404,20 +418,15 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
 });
 
 function standardizeDiscordEmojiUrl(url) {
-  if (!url) return '';
-  const customEmojiMatch = url.match(/<?(a)?:?(\w+):(\d+)>?/);
   const discordEmojiUrlMatch = url.match(/^https:\/\/cdn\.discordapp\.com\/emojis\/(\d+)\.(png|gif|webp)(\?.*)?$/);
-
-  if (customEmojiMatch) {
-    const animated = customEmojiMatch[1] === 'a';
-    const emojiId = customEmojiMatch[3];
-    return `https://cdn.discordapp.com/emojis/${emojiId}.${animated ? 'gif' : 'png'}`;
-  } else if (discordEmojiUrlMatch) {
+  if (discordEmojiUrlMatch) {
     const emojiId = discordEmojiUrlMatch[1];
-    const isAnimated = discordEmojiUrlMatch[2] === 'gif' || (discordEmojiUrlMatch[3] && discordEmojiUrlMatch[3].includes('animated=true'));
+    const originalExtension = discordEmojiUrlMatch[2];
+    const queryParams = discordEmojiUrlMatch[3] || '';
+    const isAnimated = originalExtension === 'gif' || queryParams.includes('animated=true');
     return `https://cdn.discordapp.com/emojis/${emojiId}.${isAnimated ? 'gif' : 'png'}`;
   }
-  return url; // Return as is if not a recognized Discord emoji format
+  return url;
 }
 
 app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
@@ -472,20 +481,30 @@ async function validateShopItemPayload(itemData) {
     if (!rule.type || typeof rule.value === 'undefined') {
       return `Type ou valeur manquant pour une règle de ${type}.`;
     }
-    if (['has_role', 'not_has_role', 'give_role', 'remove_role'].includes(rule.type)) {
+    if (['has_role', 'not_has_role'].includes(rule.type)) {
       if (typeof rule.value !== 'string' || rule.value.length === 0) {
-        return `ID de rôle invalide pour la règle/action de ${type} de type ${rule.type}.`;
+        return `ID de rôle invalide pour la règle de ${type} de type ${rule.type}.`;
       }
-    } else if (['has_item', 'not_has_item', 'give_item', 'remove_item'].includes(rule.type)) {
+    } else if (['has_item', 'not_has_item'].includes(rule.type)) {
+      // Ensure itemId is a number for validation
       if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
-        return `Données d'item invalides pour la règle/action de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
+        return { isValid: false, message: `Données d'item invalides pour la règle de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)` };
       }
-    } else if (rule.type === 'give_money') {
+    } else if (['give_money'].includes(rule.type)) {
       if (typeof rule.value !== 'number' || rule.value < 0) {
-        return `Montant d'argent invalide pour l'action de ${type} de type ${rule.type}.`;
+        return `Montant d'argent invalide pour la règle de ${type} de type ${rule.type}.`;
+      }
+    } else if (['give_role', 'remove_role'].includes(rule.type)) {
+      if (typeof rule.value !== 'string' || rule.value.length === 0) {
+        return `ID de rôle invalide pour l'action de ${type} de type ${rule.type}.`;
+      }
+    } else if (['give_item', 'remove_item'].includes(rule.type)) {
+      // Ensure itemId is a number for validation
+      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
+        return `Données d'item invalides pour l'action de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
       }
     } else {
-      return `Type de règle/action de ${type} inconnu: ${rule.type}.`;
+      return `Type de règle de ${type} inconnu: ${rule.type}.`;
     }
     return null;
   };
@@ -522,9 +541,6 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
-    // Standardize image_url before saving
-    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
-
     const newItem = await addShopItem(guildId, itemData); // Use the updated addShopItem
     return res.status(201).json(newItem);
   } catch (error) {
@@ -547,9 +563,6 @@ app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
-    // Standardize image_url before saving
-    itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
-
     const updatedItem = await updateShopItem(guildId, itemId, itemData); // Use the updated updateShopItem
     return res.json(updatedItem);
   } catch (error) {
