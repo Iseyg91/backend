@@ -28,9 +28,7 @@ async function getDbConnectionFromPool() {
 const DEFAULT_ECONOMY_SETTINGS = {
   general_embeds: {
     balance_embed_color: "#00ffcc",
-    // balance_embed_theme: "default", // Supprimé
     collect_embed_color: "#00ffcc",
-    // collect_embed_theme: "default" // Supprimé
   },
   currency: {
     name: "Crédits", // Nom par défaut
@@ -83,9 +81,9 @@ const DEFAULT_ECONOMY_SETTINGS = {
     min_bet: 1,
     max_bet: 2000,
     outcomes: [
-      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
-      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
-      {"color": "#008000", "multiplier": 14, "numbers": [0]}
+      {"name": "Rouge", "color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
+      {"name": "Noir", "color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
+      {"name": "Vert (0)", "color": "#008000", "multiplier": 14, "numbers": [0]}
     ]
   },
   dice_game: {
@@ -125,29 +123,31 @@ async function getGuildSettings(guildId) {
       [guildId]
     );
 
-    let economySettings = JSON.parse(JSON.stringify(DEFAULT_ECONOMY_SETTINGS));
+    let economySettings = JSON.parse(JSON.stringify(DEFAULT_ECONOMY_SETTINGS)); // Start with a deep copy of defaults
 
     if (economyRows.length > 0 && economyRows[0].economy_settings) {
       try {
         const existingSettings = JSON.parse(economyRows[0].economy_settings);
         // Perform a deep merge to ensure all default keys are present and existing values override
-        for (const key in DEFAULT_ECONOMY_SETTINGS) {
+        for (const key in economySettings) { // Iterate over DEFAULT_ECONOMY_SETTINGS keys
           if (existingSettings.hasOwnProperty(key)) {
-            if (typeof DEFAULT_ECONOMY_SETTINGS[key] === 'object' && DEFAULT_ECONOMY_SETTINGS[key] !== null && !Array.isArray(DEFAULT_ECONOMY_SETTINGS[key])) {
-              // Deep merge for nested objects, but exclude the theme properties
-              economySettings[key] = { ...DEFAULT_ECONOMY_SETTINGS[key], ...existingSettings[key] };
-              // Explicitly remove theme properties if they exist in existingSettings
+            if (typeof economySettings[key] === 'object' && economySettings[key] !== null && !Array.isArray(economySettings[key])) {
+              // Deep merge for nested objects
+              economySettings[key] = { ...economySettings[key], ...existingSettings[key] };
+              // Explicitly remove theme properties if they exist in existingSettings (legacy)
               if (key === 'general_embeds') {
                 delete economySettings[key].balance_embed_theme;
                 delete economySettings[key].collect_embed_theme;
               }
             } else {
-              economySettings[key] = existingSettings[key];
+              economySettings[key] = existingSettings[key]; // Override with existing value
             }
           }
+          // If existingSettings does not have the key, default value is already in economySettings
         }
       } catch (parseError) {
         console.error(`Erreur de parsing JSON pour economy_settings de la guilde ${guildId}:`, parseError);
+        // If parsing fails, we proceed with default settings
       }
     }
 
@@ -178,6 +178,9 @@ async function updateEconomySettings(guildId, newEconomySettings) {
       delete settingsToSave.general_embeds.balance_embed_theme;
       delete settingsToSave.general_embeds.collect_embed_theme;
     }
+    // Remove collect_roles from the JSON to be saved in economy_settings, as they are in a separate table
+    delete settingsToSave.collect_roles;
+
     const settingsJson = JSON.stringify(settingsToSave);
     console.log(`Updating settings for guild ${guildId} with:`, settingsJson);
 
@@ -220,7 +223,8 @@ async function addCollectRole(guildId, roleData) {
   } catch (error) {
     console.error(`Error in addCollectRole for guild ${guildId}:`, error);
     throw error;
-  } finally { {
+  } finally {
+    if (connection) { // Added check for connection
       connection.release();
     }
   }
@@ -342,7 +346,7 @@ async function updateShopItem(guildId, itemId, itemData) {
       throw new Error("Article non trouvé.");
     }
     const mergedItemData = { ...existingItem, ...itemData };
-    mergedItemData.id = itemId; // Ensure the ID in the JSON matches the DB ID
+    mergedItemData.id = parseInt(itemId); // Ensure the ID in the JSON matches the DB ID and is an integer
     const itemJson = JSON.stringify(mergedItemData);
 
     const [result] = await connection.execute(
@@ -353,7 +357,7 @@ async function updateShopItem(guildId, itemId, itemData) {
       throw new Error("Article non trouvé ou aucune modification effectuée.");
     }
     console.log(`Shop item ${itemId} updated successfully for guild ${guildId}.`);
-    return { id: itemId, ...mergedItemData };
+    return { id: parseInt(itemId), ...mergedItemData };
   } catch (error) {
     console.error(`Error in updateShopItem for guild ${guildId}:`, error);
     throw error;
