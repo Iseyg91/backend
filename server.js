@@ -341,6 +341,22 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
 
     let mergedSettings = deepMerge(currentSettings, newEconomySettingsPayload);
 
+    // Validation spécifique pour la roulette : numéros dupliqués par nom de pari
+    if (mergedSettings.roulette_game && mergedSettings.roulette_game.outcomes) {
+      const outcomeNames = {};
+      for (const outcome of mergedSettings.roulette_game.outcomes) {
+        if (!outcomeNames[outcome.name]) {
+          outcomeNames[outcome.name] = new Set();
+        }
+        for (const num of outcome.numbers) {
+          if (outcomeNames[outcome.name].has(num)) {
+            return res.status(400).json({ message: `Erreur de validation de la Roulette: Le numéro ${num} est dupliqué pour le pari "${outcome.name}". Chaque numéro doit être unique par nom de pari.` });
+          }
+          outcomeNames[outcome.name].add(num);
+        }
+      }
+    }
+
     // Assurer que max_multiplier est un nombre flottant
     if (mergedSettings.crash_game && typeof mergedSettings.crash_game.max_multiplier === 'string') {
       mergedSettings.crash_game.max_multiplier = parseFloat(mergedSettings.crash_game.max_multiplier);
@@ -471,134 +487,75 @@ async function validateShopItemPayload(itemData) {
     return { isValid: false, message: "Nom et prix de l'article sont requis et le prix doit être positif." };
   }
   if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
-    return { isValid: false, message: "Le stock doit être un nombre positif si le stock n'est pas illimité." };
+    return { isValid: false, message: "Le stock doit être défini et positif si le stock n'est pas illimité." };
   }
-  if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction <= 0)) {
-    return { isValid: false, message: "La quantité maximale par transaction doit être un nombre positif ou nulle pour illimité." };
+  if (itemData.max_purchase_per_transaction !== null && itemData.max_purchase_per_transaction < 1) {
+    return { isValid: false, message: "La quantité maximale par transaction doit être au moins 1 ou vide pour illimité." };
   }
-
-  const validateRule = (rule, type) => {
-    if (!rule.type || typeof rule.value === 'undefined') {
-      return `Type ou valeur manquant pour une règle de ${type}.`;
-    }
-    if (['has_role', 'not_has_role'].includes(rule.type)) {
-      if (typeof rule.value !== 'string' || rule.value.length === 0) {
-        return `ID de rôle invalide pour la règle de ${type} de type ${rule.type}.`;
-      }
-    } else if (['has_item', 'not_has_item'].includes(rule.type)) {
-      // Ensure itemId is a number for validation
-      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
-        return { isValid: false, message: `Données d'item invalides pour la règle de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)` };
-      }
-    } else if (['give_money'].includes(rule.type)) {
-      if (typeof rule.value !== 'number' || rule.value < 0) {
-        return `Montant d'argent invalide pour la règle de ${type} de type ${rule.type}.`;
-      }
-    } else if (['give_role', 'remove_role'].includes(rule.type)) {
-      if (typeof rule.value !== 'string' || rule.value.length === 0) {
-        return `ID de rôle invalide pour l'action de ${type} de type ${rule.type}.`;
-      }
-    } else if (['give_item', 'remove_item'].includes(rule.type)) {
-      // Ensure itemId is a number for validation
-      if (typeof rule.value !== 'object' || !rule.value.itemId || typeof rule.value.quantity !== 'number' || rule.value.quantity <= 0 || isNaN(Number(rule.value.itemId))) {
-        return `Données d'item invalides pour l'action de ${type} de type ${rule.type}. (itemId doit être un nombre et quantity > 0 requis)`;
-      }
-    } else {
-      return `Type de règle de ${type} inconnu: ${rule.type}.`;
-    }
-    return null;
-  };
-
-  for (const req of itemData.requirements) {
-    const error = validateRule(req, 'requirement');
-    if (error) return { isValid: false, message: `Erreur dans les exigences d'achat: ${error}` };
-  }
-  if (itemData.on_use_requirements) { // Check if property exists
-    for (const req of itemData.on_use_requirements) {
-      const error = validateRule(req, 'on_use_requirement');
-      if (error) return { isValid: false, message: `Erreur dans les exigences d'utilisation: ${error}` };
-    }
-  }
-  for (const action of itemData.on_purchase_actions) {
-    const error = validateRule(action, 'on_purchase_action');
-    if (error) return { isValid: false, message: `Erreur dans les actions d'achat: ${error}` };
-  }
-  for (const action of itemData.on_use_actions) {
-    const error = validateRule(action, 'on_use_action');
-    if (error) return { isValid: false, message: `Erreur dans les actions d'utilisation: ${error}` };
-  }
-
+  // Plus de validations peuvent être ajoutées ici selon besoin
   return { isValid: true };
 }
 
 app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const itemData = req.body;
-  let connection;
+
   try {
-    connection = await getDbConnection();
     const validation = await validateShopItemPayload(itemData);
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
-    const newItem = await addShopItem(guildId, itemData); // Use the updated addShopItem
+
+    // Standardiser l'URL emoji si besoin
+    if (itemData.image_url) {
+      itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
+    }
+
+    const newItem = await addShopItem(guildId, itemData);
     return res.status(201).json(newItem);
   } catch (error) {
-    console.error(`Error in addShopItem route for guild ${guildId}:`, error);
-    res.status(500).json({ message: error.message || "Erreur lors de l'ajout de l'article du shop." });
-  } finally {
-    if (connection) {
-      connection.release();
-    }
+    console.error(`Erreur lors de l'ajout d'un item pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de l'ajout de l'article." });
   }
 });
 
 app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const { guildId, itemId } = req.params;
+  const guildId = req.params.guildId;
+  const itemId = req.params.itemId;
   const itemData = req.body;
-  let connection;
+
   try {
-    connection = await getDbConnection();
     const validation = await validateShopItemPayload(itemData);
     if (!validation.isValid) {
       return res.status(400).json({ message: validation.message });
     }
-    const updatedItem = await updateShopItem(guildId, itemId, itemData); // Use the updated updateShopItem
+
+    if (itemData.image_url) {
+      itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
+    }
+
+    const updatedItem = await updateShopItem(guildId, itemId, itemData);
     return res.json(updatedItem);
   } catch (error) {
-    console.error(`Error in updateShopItem route for guild ${guildId}, item ${itemId}:`, error);
-    res.status(500).json({ message: error.message || "Erreur lors de la mise à jour de l'article du shop." });
-  } finally {
-    if (connection) {
-      connection.release();
-    }
+    console.error(`Erreur lors de la mise à jour de l'item ${itemId} pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la mise à jour de l'article." });
   }
 });
 
 app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const { guildId, itemId } = req.params;
-  let connection;
+  const guildId = req.params.guildId;
+  const itemId = req.params.itemId;
+
   try {
-    connection = await getDbConnection();
     await deleteShopItem(guildId, itemId);
     return res.json({ message: "Article supprimé avec succès." });
   } catch (error) {
-    console.error(`Error in deleteShopItem route for guild ${guildId}, item ${itemId}:`, error);
-    res.status(500).json({ message: error.message || "Erreur lors de la suppression de l'article du shop." });
-  } finally {
-    if (connection) {
-      connection.release();
-    }
+    console.error(`Erreur lors de la suppression de l'item ${itemId} pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la suppression de l'article." });
   }
 });
 
-// Start the server
-initializeDbPool().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}).catch(err => {
-  console.error('Failed to start server due to DB initialization error:', err);
+app.listen(PORT, () => {
+  console.log(`Serveur backend démarré sur le port ${PORT}`);
+  initializeDbPool();
 });
-
-module.exports = app;
