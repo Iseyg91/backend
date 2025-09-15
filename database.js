@@ -28,9 +28,7 @@ async function getDbConnectionFromPool() {
 const DEFAULT_ECONOMY_SETTINGS = {
   general_embeds: {
     balance_embed_color: "#00ffcc",
-    // balance_embed_theme: "default", // Supprimé
     collect_embed_color: "#00ffcc",
-    // collect_embed_theme: "default" // Supprimé
   },
   currency: {
     name: "Crédits", // Nom par défaut
@@ -83,9 +81,9 @@ const DEFAULT_ECONOMY_SETTINGS = {
     min_bet: 1,
     max_bet: 2000,
     outcomes: [
-      {"color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
-      {"color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
-      {"color": "#008000", "multiplier": 14, "numbers": [0]}
+      {"name": "Rouge", "color": "#FF0000", "multiplier": 2, "numbers": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
+      {"name": "Noir", "color": "#000000", "multiplier": 2, "numbers": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
+      {"name": "Vert (0)", "color": "#008000", "multiplier": 14, "numbers": [0]}
     ]
   },
   dice_game: {
@@ -94,6 +92,35 @@ const DEFAULT_ECONOMY_SETTINGS = {
     max_bet: 100,
     min_roll: 1,
     max_roll: 99
+  },
+  // NOUVEAU: Paramètres de permissions
+  permissions: {
+    admin_roles: [], // IDs des rôles qui peuvent utiliser les commandes admin d'économie
+    command_states: { // État d'activation/désactivation par commande
+      "balance": { enabled: true, slash: true, prefix: true },
+      "deposit": { enabled: true, slash: true, prefix: true },
+      "withdraw": { enabled: true, slash: true, prefix: true },
+      "transfer": { enabled: true, slash: true, prefix: true },
+      "leaderboard": { enabled: true, slash: true, prefix: true },
+      "collect": { enabled: true, slash: true, prefix: true },
+      "bonus": { enabled: true, slash: true, prefix: true },
+      "quest": { enabled: true, slash: true, prefix: true },
+      "risk": { enabled: true, slash: true, prefix: true },
+      "shop": { enabled: true, slash: true, prefix: true },
+      "buy": { enabled: true, slash: true, prefix: true },
+      "inventory": { enabled: true, slash: true, prefix: true },
+      "use": { enabled: true, slash: true, prefix: true },
+      "crash": { enabled: true, slash: true, prefix: true },
+      "plinko": { enabled: true, slash: true, prefix: true },
+      "roulette": { enabled: true, slash: true, prefix: true },
+      "dice": { enabled: true, slash: true, prefix: true },
+      "add-money": { enabled: true, slash: true, prefix: true },
+      "remove-money": { enabled: true, slash: true, prefix: true },
+      "set-money": { enabled: true, slash: true, prefix: true },
+      "add-item": { enabled: true, slash: true, prefix: true },
+      "remove-item": { enabled: true, slash: true, prefix: true },
+      "set-item": { enabled: true, slash: true, prefix: true },
+    }
   }
 };
 
@@ -241,7 +268,8 @@ async function addCollectRole(guildId, roleData) {
   } catch (error) {
     console.error(`Error in addCollectRole for guild ${guildId}:`, error);
     throw error;
-  } finally { {
+  } finally {
+    if (connection) {
       connection.release();
     }
   }
