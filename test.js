@@ -796,7 +796,7 @@
               <form id="permissions-form" class="space-y-6">
                 <div class="form-group">
                   <label for="admin-roles-select" class="text-lg font-semibold text-indigo-300">Rôles Administrateurs d'Économie</label>
-                  <p class="text-gray-500 text-sm mt-1 mb-2">Sélectionnez les rôles qui auront la permission d'utiliser les commandes d'administration d'économie (ex: `/add-money`, `/remove-money`, `/add-item`, `/remove-item`).</p>
+                  <p class="text-gray-500 text-sm mt-1 mb-2">Sélectionnez les rôles qui auront la permission d'utiliser les commandes d'administration d'économie (ex: `/add-money`, `/remove-money`, `/add-inventory`, `/remove-inventory`).</p>
                   <div id="admin-roles-container" class="space-y-2">
                     <!-- Les rôles admin seront listés ici -->
                   </div>
