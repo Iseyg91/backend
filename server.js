@@ -8,6 +8,9 @@ const mysql = require('mysql2/promise');
 const { 
   Client, GatewayIntentBits, PermissionsBitField 
 } = require('discord.js');
+const helmet = require('helmet'); // Pour la sécurité des en-têtes HTTP
+const hpp = require('hpp'); // Pour la protection contre la pollution des paramètres HTTP
+
 const { 
   getGuildSettings, 
   updateEconomySettings, 
@@ -33,7 +36,18 @@ const DB_USER = process.env.DB_USER;
 const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_NAME = process.env.DB_NAME;
 
-app.use(cors());
+// Middleware de sécurité
+app.use(helmet());
+app.use(hpp()); // Protection contre la pollution des paramètres HTTP
+
+// Configuration CORS
+const corsOptions = {
+  origin: ['https://project-delta.fr', 'http://localhost:3000'], // Remplacez par l'URL de votre frontend en production
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  credentials: true,
+  optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const dbConfig = {
