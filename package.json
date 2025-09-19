@@ -1,4 +1,4 @@
-// {
+{
   "name": "project-delta-backend",
   "version": "1.0.0",
   "description": "Backend pour Project Delta Discord Bot Dashboard",
@@ -24,3 +24,4 @@
     "nodemon": "^3.0.2"
   }
 }
+
