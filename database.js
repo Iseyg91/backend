@@ -120,6 +120,7 @@ const DEFAULT_ECONOMY_SETTINGS = {
       "reset-money": { enabled: true, slash: true, prefix: true },
       "leaderboard": { enabled: true, slash: true, prefix: true },
       "collect": { enabled: true, slash: true, prefix: true },
+      "steal": { enabled: true, slash: true, prefix: true }, // Nouvelle commande /steal
     }
   }
 };
