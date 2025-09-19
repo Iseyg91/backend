@@ -8,9 +8,6 @@ const mysql = require('mysql2/promise');
 const { 
   Client, GatewayIntentBits, PermissionsBitField 
 } = require('discord.js');
-const helmet = require('helmet'); // Pour la sécurité des en-têtes HTTP
-const hpp = require('hpp'); // Pour la protection contre la pollution des paramètres HTTP
-
 const { 
   getGuildSettings, 
   updateEconomySettings, 
@@ -36,16 +33,14 @@ const DB_USER = process.env.DB_USER;
 const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_NAME = process.env.DB_NAME;
 
-// Middleware de sécurité
-app.use(helmet());
-app.use(hpp()); // Protection contre la pollution des paramètres HTTP
-
-// Configuration CORS
+// Configuration CORS pour une sécurité renforcée
+// Remplacez '*' par l'URL de votre frontend en production pour limiter l'accès
 const corsOptions = {
-  origin: ['https://project-delta.fr', 'http://localhost:3000'], // Remplacez par l'URL de votre frontend en production
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  origin: process.env.FRONTEND_URL || 'http://localhost:8080', // Remplacez par l'URL de votre site internet
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -54,7 +49,15 @@ const dbConfig = {
   host: DB_HOST,
   user: DB_USER,
   password: DB_PASSWORD,
-  database: DB_NAME
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  // Activer SSL/TLS si votre base de données le supporte et l'exige
+  // ssl: {
+  //   rejectUnauthorized: true, // Définir à false si vous utilisez un certificat auto-signé en dev, mais true en prod
+  //   ca: fs.readFileSync('/path/to/your/ca-cert.pem') // Chemin vers votre certificat CA
+  // }
 };
 
 let pool;
@@ -67,6 +70,7 @@ async function initializeDbPool() {
     console.log('Successfully connected to MySQL database!');
   } catch (error) {
     console.error('Failed to initialize MySQL connection pool:', error);
+    // En production, il est crucial de ne pas démarrer si la DB n'est pas accessible
     process.exit(1); 
   }
 }
@@ -90,6 +94,8 @@ bot.on('error', error => {
 
 bot.login(BOT_TOKEN).catch(err => {
   console.error('Failed to login to Discord bot:', err);
+  // En production, si le bot ne peut pas se connecter, cela peut être critique
+  // process.exit(1); 
 });
 
 async function authenticateToken(req, res, next) {
@@ -98,7 +104,7 @@ async function authenticateToken(req, res, next) {
 
   if (token == null) {
     console.warn('Authentication: No token provided.');
-    return res.sendStatus(401);
+    return res.sendStatus(401); // Unauthorized
   }
 
   req.accessToken = token;
@@ -393,6 +399,10 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
     return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
   } catch (error) {
     console.error("Erreur lors de la mise à jour des paramètres d'économie :", error);
+    // Amélioration de la gestion des erreurs pour ne pas exposer les détails internes
+    if (error.message.includes("Duplicate entry")) {
+      return res.status(409).json({ message: "Un paramètre avec cette valeur existe déjà." });
+    }
     return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'économie." });
   } finally {
     if (connection) connection.release();
@@ -404,12 +414,16 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
   const { role_id, amount, cooldown } = req.body;
   let connection;
 
+  // Validation des entrées
   if (!role_id || !amount || !cooldown) {
     return res.status(400).json({ message: "Données de rôle de collect manquantes (role_id, amount, cooldown)." });
   }
-
   if (typeof amount !== 'number' || amount <= 0 || typeof cooldown !== 'number' || cooldown <= 0) {
       return res.status(400).json({ message: "Montant et cooldown doivent être des nombres positifs." });
+  }
+  // Assurer que role_id est une chaîne de caractères valide (ID Discord)
+  if (typeof role_id !== 'string' || !/^\d{17,19}$/.test(role_id)) {
+    return res.status(400).json({ message: "L'ID du rôle est invalide." });
   }
 
   try {
@@ -432,6 +446,11 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
   const roleIdToDelete = req.params.roleId;
   let connection;
 
+  // Validation de l'ID du rôle
+  if (typeof roleIdToDelete !== 'string' || !/^\d{17,19}$/.test(roleIdToDelete)) {
+    return res.status(400).json({ message: "L'ID du rôle à supprimer est invalide." });
+  }
+
   try {
     connection = await getDbConnection();
     await deleteCollectRole(guildId, roleIdToDelete);
@@ -448,6 +467,7 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
 });
 
 function standardizeDiscordEmojiUrl(url) {
+  // Nettoie l'URL pour s'assurer qu'elle pointe vers .png ou .gif
   const discordEmojiUrlMatch = url.match(/^https:\/\/cdn\.discordapp\.com\/emojis\/(\d+)\.(png|gif|webp)(\?.*)?$/);
   if (discordEmojiUrlMatch) {
     const emojiId = discordEmojiUrlMatch[1];
@@ -497,16 +517,19 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
 });
 
 async function validateShopItemPayload(itemData) {
-  if (!itemData.name || typeof itemData.price === 'undefined' || itemData.price < 0) {
-    return { isValid: false, message: "Nom et prix de l'article sont requis et le prix doit être positif." };
+  if (!itemData.name || typeof itemData.name !== 'string' || itemData.name.trim() === '') {
+    return { isValid: false, message: "Le nom de l'article est requis." };
   }
-  if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || itemData.stock < 0)) {
+  if (typeof itemData.price === 'undefined' || typeof itemData.price !== 'number' || itemData.price < 0) {
+    return { isValid: false, message: "Le prix de l'article est requis et doit être un nombre positif." };
+  }
+  if (!itemData.unlimited_stock && (typeof itemData.stock === 'undefined' || typeof itemData.stock !== 'number' || itemData.stock < 0)) {
     return { isValid: false, message: "Le stock doit être défini et positif si le stock n'est pas illimité." };
   }
-  if (itemData.max_purchase_per_transaction !== null && itemData.max_purchase_per_transaction < 1) {
+  if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction < 1)) {
     return { isValid: false, message: "La quantité maximale par transaction doit être au moins 1 ou vide pour illimité." };
   }
-  // Plus de validations peuvent être ajoutées ici selon besoin
+  // Plus de validations peuvent être ajoutées ici selon besoin (ex: validation des structures requirements/actions)
   return { isValid: true };
 }
 
@@ -567,6 +590,12 @@ app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGu
     console.error(`Erreur lors de la suppression de l'item ${itemId} pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur lors de la suppression de l'article." });
   }
+});
+
+// Gestion centralisée des erreurs
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Something broke!');
 });
 
 app.listen(PORT, () => {
