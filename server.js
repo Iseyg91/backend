@@ -34,9 +34,16 @@ const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_NAME = process.env.DB_NAME;
 
 // Configuration CORS pour une sécurité renforcée
-// Remplacez '*' par l'URL de votre frontend en production pour limiter l'accès
+// Utiliser une fonction pour permettre plusieurs origines (localhost pour dev, site prod)
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:8080', // Remplacez par l'URL de votre site internet
+  origin: function (origin, callback) {
+    const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:8080', 'https://project-delta.fr'];
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -204,122 +211,48 @@ app.get('/api/discord-oauth', async (req, res) => {
     const ADMINISTRATOR_PERMISSION = PermissionsBitField.Flags.Administrator;
 
     if (!bot.isReady()) {
-      console.error('OAuth: Discord bot is not ready when processing guilds.');
-      const processedGuilds = userGuilds.map(g => ({
-        id: g.id,
-        name: g.name,
-        icon: g.icon,
-        memberCount: 0,
-        isOwner: g.owner,
-        hasAdminPerms: (BigInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION,
-        isInServer: false
-      }));
-      return res.json({
-        success: true,
-        user,
-        guilds: processedGuilds,
-        accessToken: access_token,
-        message: "Bot not fully ready, guild presence might be inaccurate."
-      });
+      console.error('OAuth: Discord bot is not ready when processing OAuth callback.');
+      return res.status(503).json({ success: false, error: 'Bot Discord non prêt.' });
     }
 
-    const botGuilds = bot.guilds.cache.map(g => ({
-      id: g.id,
-      name: g.name,
-      memberCount: g.memberCount || 0
-    }));
-
-    const processedGuilds = userGuilds.map(g => {
-      const hasAdminPerms = (BigInt(g.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
-      const isOwner = g.owner;
-
-      const botGuild = botGuilds.find(bg => bg.id === g.id);
-
+    const mutualGuilds = userGuilds.map(guild => {
+      const botGuild = bot.guilds.cache.get(guild.id);
+      const hasAdminPerms = (BigInt(guild.permissions) & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
       return {
-        id: g.id,
-        name: g.name,
-        icon: g.icon,
-        memberCount: botGuild ? botGuild.memberCount : 0,
-        isOwner,
-        hasAdminPerms,
-        isInServer: !!botGuild
+        id: guild.id,
+        name: guild.name,
+        icon: guild.icon,
+        isOwner: guild.owner,
+        hasAdminPerms: hasAdminPerms,
+        isInServer: !!botGuild,
+        memberCount: botGuild ? botGuild.memberCount : 0
       };
     });
 
-    res.json({
+    return res.json({
       success: true,
-      user,
-      guilds: processedGuilds,
+      user: {
+        id: user.id,
+        username: user.username,
+        discriminator: user.discriminator,
+        avatar: user.avatar
+      },
+      guilds: mutualGuilds,
       accessToken: access_token
     });
 
   } catch (error) {
-    console.error('Erreur OAuth2 Discord :', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: error.response?.data?.error_description || 'Erreur lors de l\'authentification Discord.'
-    });
+    console.error('Erreur lors de l\'échange du code OAuth:', error.response?.data || error.message);
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 401 || error.response?.status === 400) {
+        return res.status(error.response.status).json({ success: false, error: 'Code OAuth invalide ou expiré.' });
+      }
+    }
+    return res.status(500).json({ success: false, error: 'Erreur interne lors de l\'authentification Discord.' });
   }
 });
 
-app.get('/api/test-db', async (req, res) => {
-  let connection;
-  try {
-    connection = await getDbConnection();
-    const [rows] = await connection.execute('SELECT 1 + 1 AS solution');
-    res.json({ success: true, message: 'Connexion DB réussie', solution: rows[0].solution });
-  } catch (error) {
-    console.error('Erreur test DB :', error);
-    res.status(500).json({ success: false, error: 'Erreur de connexion ou requête DB.' });
-  } finally {
-    if (connection) connection.release();
-  }
-});
-
-app.get('/api/guilds/:guildId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const guildId = req.params.guildId;
-  try {
-    const guild = req.botGuild; 
-
-    res.json({
-      success: true,
-      id: guild.id,
-      name: guild.name,
-      icon: guild.icon,
-      memberCount: guild.memberCount
-    });
-
-  } catch (error) {
-    console.error(`Erreur lors de la récupération des informations de la guilde ${guildId} :`, error);
-    res.status(500).json({ success: false, error: 'Erreur interne du serveur.' });
-  }
-});
-
-app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
-  const guildId = req.params.guildId;
-  try {
-    const guild = req.botGuild;
-    await guild.roles.fetch(); 
-
-    const roles = guild.roles.cache
-      .filter(role => !role.managed && role.id !== guild.id)
-      .sort((a, b) => b.position - a.position)
-      .map(role => ({
-        id: role.id,
-        name: role.name,
-        color: role.hexColor,
-        position: role.position
-      }));
-
-    res.json(roles);
-
-  } catch (error) {
-    console.error(`Erreur lors de la récupération des rôles de la guilde ${guildId} :`, error);
-    res.status(500).json({ success: false, error: 'Erreur interne du serveur.' });
-  }
-});
-
-app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
+app.get('/api/guilds/:guildId/settings', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   let connection;
   try {
@@ -327,83 +260,58 @@ app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAd
     const settings = await getGuildSettings(guildId);
     return res.json(settings);
   } catch (error) {
-    console.error("Erreur lors de la récupération des paramètres d'économie :", error);
-    return res.status(500).json({ message: "Erreur lors de la récupération des paramètres d'économie." });
+    console.error(`Erreur lors de la récupération des paramètres pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la récupération des paramètres." });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
+app.put('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
-  const newEconomySettingsPayload = req.body;
+  const newSettings = req.body;
   let connection;
-
   try {
     connection = await getDbConnection();
-    let currentSettings = await getGuildSettings(guildId);
-    
-    // Utiliser une fusion profonde pour s'assurer que toutes les propriétés sont correctement mises à jour
-    // et que les objets imbriqués sont fusionnés et non écrasés.
-    const deepMerge = (target, source) => {
-      const output = { ...target };
-      if (target && typeof target === 'object' && source && typeof source === 'object') {
-        Object.keys(source).forEach(key => {
-          if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
-            output[key] = deepMerge(target[key], source[key]);
-          } else {
-            output[key] = source[key];
-          }
-        });
-      }
-      return output;
-    };
-
-    let mergedSettings = deepMerge(currentSettings, newEconomySettingsPayload);
-
-    // Validation spécifique pour la roulette : numéros dupliqués par nom de pari
-    if (mergedSettings.roulette_game && mergedSettings.roulette_game.outcomes) {
-      const outcomeNames = {};
-      for (const outcome of mergedSettings.roulette_game.outcomes) {
-        if (!outcomeNames[outcome.name]) {
-          outcomeNames[outcome.name] = new Set();
-        }
-        for (const num of outcome.numbers) {
-          if (outcomeNames[outcome.name].has(num)) {
-            return res.status(400).json({ message: `Erreur de validation de la Roulette: Le numéro ${num} est dupliqué pour le pari "${outcome.name}". Chaque numéro doit être unique par nom de pari.` });
-          }
-          outcomeNames[outcome.name].add(num);
-        }
-      }
-    }
-
-    // Assurer que max_multiplier est un nombre flottant
-    if (mergedSettings.crash_game && typeof mergedSettings.crash_game.max_multiplier === 'string') {
-      mergedSettings.crash_game.max_multiplier = parseFloat(mergedSettings.crash_game.max_multiplier);
-    } else if (mergedSettings.crash_game && typeof mergedSettings.crash_game.max_multiplier !== 'number') {
-        // Fallback si ce n'est ni une chaîne ni un nombre (ex: null, undefined)
-        // Utiliser la valeur par défaut du backend pour éviter les problèmes
-        mergedSettings.crash_game.max_multiplier = 100.0; // Valeur par défaut du DEFAULT_ECONOMY_SETTINGS
-    }
-
-    // Explicitly remove theme properties from the merged settings before saving
-    if (mergedSettings.general_embeds) {
-      delete mergedSettings.general_embeds.balance_embed_theme;
-      delete mergedSettings.general_embeds.collect_embed_theme;
-    }
-
-    // Conserver les collect_roles car ils sont gérés séparément
-    mergedSettings.collect_roles = currentSettings.collect_roles; 
-
-    await updateEconomySettings(guildId, mergedSettings);
-    return res.json({ message: "Paramètres d'économie mis à jour avec succès." });
+    const updatedSettings = await updateEconomySettings(guildId, newSettings);
+    return res.json(updatedSettings);
   } catch (error) {
-    console.error("Erreur lors de la mise à jour des paramètres d'économie :", error);
-    // Amélioration de la gestion des erreurs pour ne pas exposer les détails internes
-    if (error.message.includes("Duplicate entry")) {
-      return res.status(409).json({ message: "Un paramètre avec cette valeur existe déjà." });
-    }
-    return res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'économie." });
+    console.error(`Erreur lors de la mise à jour des paramètres d'économie pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'économie." });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get('/api/guilds/:guildId/roles', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
+  const guildId = req.params.guildId;
+  const botGuild = req.botGuild;
+  try {
+    const roles = botGuild.roles.cache.map(role => ({
+      id: role.id,
+      name: role.name,
+      color: role.hexColor
+    }));
+    return res.json(roles);
+  } catch (error) {
+    console.error(`Erreur lors de la récupération des rôles pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la récupération des rôles." });
+  }
+});
+
+app.get('/api/guilds/:guildId/collect_roles', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
+  const guildId = req.params.guildId;
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const [rows] = await connection.execute(
+      'SELECT role_id, amount, cooldown FROM collect_roles WHERE guild_id = ?',
+      [guildId]
+    );
+    return res.json(rows);
+  } catch (error) {
+    console.error(`Erreur lors de la récupération des rôles de collect pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la récupération des rôles de collect." });
   } finally {
     if (connection) connection.release();
   }
@@ -411,25 +319,24 @@ app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildA
 
 app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
-  const { role_id, amount, cooldown } = req.body;
+  const roleData = req.body;
   let connection;
 
-  // Validation des entrées
-  if (!role_id || !amount || !cooldown) {
-    return res.status(400).json({ message: "Données de rôle de collect manquantes (role_id, amount, cooldown)." });
+  // Validation des données d'entrée
+  if (!roleData.role_id || typeof roleData.role_id !== 'string' || !/^\d{17,19}$/.test(roleData.role_id)) {
+    return res.status(400).json({ message: "L'ID du rôle est requis et doit être valide." });
   }
-  if (typeof amount !== 'number' || amount <= 0 || typeof cooldown !== 'number' || cooldown <= 0) {
-      return res.status(400).json({ message: "Montant et cooldown doivent être des nombres positifs." });
+  if (typeof roleData.amount !== 'number' || roleData.amount <= 0) {
+    return res.status(400).json({ message: "Le montant doit être un nombre positif." });
   }
-  // Assurer que role_id est une chaîne de caractères valide (ID Discord)
-  if (typeof role_id !== 'string' || !/^\d{17,19}$/.test(role_id)) {
-    return res.status(400).json({ message: "L'ID du rôle est invalide." });
+  if (typeof roleData.cooldown !== 'number' || roleData.cooldown <= 0) {
+    return res.status(400).json({ message: "Le cooldown doit être un nombre positif (en secondes)." });
   }
 
   try {
     connection = await getDbConnection();
-    await addCollectRole(guildId, { role_id, amount, cooldown });
-    return res.status(201).json({ message: "Rôle de collect ajouté avec succès." });
+    await addCollectRole(guildId, roleData);
+    return res.json({ message: "Rôle de collect ajouté avec succès." });
   } catch (error) {
     console.error("Erreur lors de l'ajout du rôle de collect :", error);
     if (error.message.includes("existe déjà")) {
