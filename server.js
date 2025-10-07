@@ -34,7 +34,6 @@ const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_NAME = process.env.DB_NAME;
 
 // Configuration CORS pour une sécurité renforcée
-// Utiliser une fonction pour permettre plusieurs origines (localhost pour dev, site prod)
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:8080', 'https://project-delta.fr'];
@@ -60,11 +59,6 @@ const dbConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  // Activer SSL/TLS si votre base de données le supporte et l'exige
-  // ssl: {
-  //   rejectUnauthorized: true, // Définir à false si vous utilisez un certificat auto-signé en dev, mais true en prod
-  //   ca: fs.readFileSync('/path/to/your/ca-cert.pem') // Chemin vers votre certificat CA
-  // }
 };
 
 let pool;
@@ -77,7 +71,6 @@ async function initializeDbPool() {
     console.log('Successfully connected to MySQL database!');
   } catch (error) {
     console.error('Failed to initialize MySQL connection pool:', error);
-    // En production, il est crucial de ne pas démarrer si la DB n'est pas accessible
     process.exit(1); 
   }
 }
@@ -101,8 +94,6 @@ bot.on('error', error => {
 
 bot.login(BOT_TOKEN).catch(err => {
   console.error('Failed to login to Discord bot:', err);
-  // En production, si le bot ne peut pas se connecter, cela peut être critique
-  // process.exit(1); 
 });
 
 async function authenticateToken(req, res, next) {
@@ -267,6 +258,24 @@ app.get('/api/guilds/:guildId/settings', authenticateToken, checkGuildAdminPermi
   }
 });
 
+app.get('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
+  const guildId = req.params.guildId;
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const settings = await getGuildSettings(guildId);
+    return res.json(settings); // Return only economy settings, as getGuildSettings already returns economy_settings
+  } catch (error) {
+    console.error(`Erreur lors de la récupération des paramètres d'économie pour la guilde ${guildId}:`, error);
+    if (error.message.includes("not found")) {
+      return res.status(404).json({ message: "Paramètres d'économie non trouvés pour cette guilde." });
+    }
+    return res.status(500).json({ message: "Erreur lors de la récupération des paramètres d'économie." });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.put('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const newSettings = req.body;
@@ -322,7 +331,6 @@ app.post('/api/guilds/:guildId/settings/economy/collect_role', authenticateToken
   const roleData = req.body;
   let connection;
 
-  // Validation des données d'entrée
   if (!roleData.role_id || typeof roleData.role_id !== 'string' || !/^\d{17,19}$/.test(roleData.role_id)) {
     return res.status(400).json({ message: "L'ID du rôle est requis et doit être valide." });
   }
@@ -353,7 +361,6 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
   const roleIdToDelete = req.params.roleId;
   let connection;
 
-  // Validation de l'ID du rôle
   if (typeof roleIdToDelete !== 'string' || !/^\d{17,19}$/.test(roleIdToDelete)) {
     return res.status(400).json({ message: "L'ID du rôle à supprimer est invalide." });
   }
@@ -374,7 +381,6 @@ app.delete('/api/guilds/:guildId/settings/economy/collect_role/:roleId', authent
 });
 
 function standardizeDiscordEmojiUrl(url) {
-  // Nettoie l'URL pour s'assurer qu'elle pointe vers .png ou .gif
   const discordEmojiUrlMatch = url.match(/^https:\/\/cdn\.discordapp\.com\/emojis\/(\d+)\.(png|gif|webp)(\?.*)?$/);
   if (discordEmojiUrlMatch) {
     const emojiId = discordEmojiUrlMatch[1];
@@ -392,7 +398,7 @@ app.get('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPer
   try {
     connection = await getDbConnection();
     console.log(`Fetching shop items for guild: ${guildId}`);
-    const items = await getShopItems(guildId); // Use the updated getShopItems
+    const items = await getShopItems(guildId);
     return res.json(items);
   } catch (error) {
     console.error(`Erreur lors de la récupération des items du shop pour la guilde ${guildId}:`, error);
@@ -408,7 +414,7 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
   try {
     connection = await getDbConnection();
     console.log(`Fetching shop item ${itemId} for guild: ${guildId}`);
-    const item = await getShopItemById(guildId, itemId); // Use the updated getShopItemById
+    const item = await getShopItemById(guildId, itemId);
     if (!item) {
       return res.status(404).json({ message: "Article non trouvé." });
     }
@@ -417,9 +423,7 @@ app.get('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuild
     console.error(`Erreur lors de la récupération de l'item ${itemId} pour la guilde ${guildId}:`, error);
     res.status(500).json({ message: "Erreur interne du serveur." });
   } finally {
-    if (connection) {
-      connection.release();
-    }
+    if (connection) connection.release();
   }
 });
 
@@ -436,7 +440,6 @@ async function validateShopItemPayload(itemData) {
   if (itemData.max_purchase_per_transaction !== null && (typeof itemData.max_purchase_per_transaction !== 'number' || itemData.max_purchase_per_transaction < 1)) {
     return { isValid: false, message: "La quantité maximale par transaction doit être au moins 1 ou vide pour illimité." };
   }
-  // Plus de validations peuvent être ajoutées ici selon besoin (ex: validation des structures requirements/actions)
   return { isValid: true };
 }
 
@@ -450,7 +453,6 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
       return res.status(400).json({ message: validation.message });
     }
 
-    // Standardiser l'URL emoji si besoin
     if (itemData.image_url) {
       itemData.image_url = standardizeDiscordEmojiUrl(itemData.image_url);
     }
@@ -499,7 +501,6 @@ app.delete('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGu
   }
 });
 
-// Gestion centralisée des erreurs
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).send('Something broke!');
