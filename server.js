@@ -465,6 +465,23 @@ app.post('/api/guilds/:guildId/shop/items', authenticateToken, checkGuildAdminPe
   }
 });
 
+app.post('/api/guilds/:guildId/settings/economy', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
+  const guildId = req.params.guildId;
+  const newSettings = req.body;
+  let connection;
+  try {
+    connection = await getDbConnection();
+    const updatedSettings = await updateEconomySettings(guildId, newSettings);
+    return res.json(updatedSettings);
+  } catch (error) {
+    console.error(`Erreur lors de la mise à jour des paramètres d'économie pour la guilde ${guildId}:`, error);
+    res.status(500).json({ message: "Erreur lors de la mise à jour des paramètres d'économie." });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+
 app.put('/api/guilds/:guildId/shop/items/:itemId', authenticateToken, checkGuildAdminPermissions, async (req, res) => {
   const guildId = req.params.guildId;
   const itemId = req.params.itemId;
